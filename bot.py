@@ -23,6 +23,8 @@ DB_PASSWORD = config('DB_PASSWORD')
 DB_HOST = config('DB_HOST')
 DB_PORT = config('DB_PORT')
 
+FIXED_USER_ID = config('FIXED_USER_ID', cast=int)  # загружаем user_id из .env
+
 # Подключение к базе данных PostgreSQL
 try:
     conn = psycopg2.connect(
@@ -37,11 +39,11 @@ except Exception as e:
     logger.error(f"Ошибка подключения к базе данных: {e}")
     exit(1)
 
-def get_user_messages(user_id):
+def get_user_messages():
     try:
         with conn.cursor() as cur:
             query = "SELECT text FROM messages WHERE user_id = %s AND text IS NOT NULL ORDER BY date ASC"
-            cur.execute(query, (user_id,))
+            cur.execute(query, (FIXED_USER_ID,))
             messages = cur.fetchall()
             return [msg[0] for msg in messages if msg[0]]
     except Exception as e:
@@ -56,7 +58,7 @@ def generate_answer(user_messages, user_question):
 
     try:
         response = openai.Completion.create(
-            engine='text-davinci-003',
+            engine='gpt-4',
             prompt=prompt,
             max_tokens=150,
             n=1,
@@ -71,17 +73,16 @@ def generate_answer(user_messages, user_question):
 
 def handle_message(update: Update, context: CallbackContext):
     try:
-        logger.info(f"Получено сообщение от пользователя {update.effective_user.id} в чате {update.effective_chat.id}")
+        logger.info(f"handle_message вызван для пользователя {update.effective_user.id} в чате {update.effective_chat.id}")
         logger.info(f"Текст сообщения: {update.message.text}")
 
-        user_id = update.effective_user.id
         user_question = update.message.text.strip()
 
-        # Получаем сообщения пользователя из базы данных
-        user_messages = get_user_messages(user_id)
+        # Получаем сообщения пользователя с фиксированным user_id из .env
+        user_messages = get_user_messages()
 
         if not user_messages:
-            update.message.reply_text("У вас еще нет сохраненных сообщений для формирования ответа.")
+            update.message.reply_text("Нет сохраненных сообщений для формирования ответа.")
             return
 
         # Генерируем ответ на основе сообщений пользователя
