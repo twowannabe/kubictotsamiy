@@ -1,4 +1,5 @@
 import logging
+import re
 from decouple import config
 import psycopg2
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
@@ -36,6 +37,15 @@ try:
 except Exception as e:
     logger.error(f"Ошибка подключения к базе данных: {e}")
     exit(1)
+
+# Функция для очистки вопроса
+def clean_question(question):
+    """Удаляет упоминания и специальные символы из вопроса."""
+    # Удаление упоминаний бота (@username)
+    question = re.sub(r'@\w+', '', question)
+    # Удаление лишних пробелов
+    question = question.strip()
+    return question
 
 def search_messages_by_topic(topic, limit=10):
     """Поиск сообщений в базе данных, содержащих ключевые слова из вопроса."""
@@ -94,17 +104,18 @@ def handle_message(update: Update, context: CallbackContext):
         logger.info(f"handle_message вызван для пользователя {update.effective_user.id} в чате {update.effective_chat.id}")
         logger.info(f"Текст сообщения: {update.message.text}")
 
-        # Получаем вопрос пользователя
+        # Получаем вопрос пользователя и очищаем его от упоминаний бота
         user_question = update.message.text.strip()
+        clean_topic = clean_question(user_question)
 
-        # Логируем вопрос пользователя
-        logger.info(f"Вопрос пользователя: {user_question}")
+        # Логируем очищенный вопрос
+        logger.info(f"Очищенный вопрос пользователя: {clean_topic}")
 
         # Поиск сообщений, связанных с темой вопроса
-        related_messages = search_messages_by_topic(user_question)
+        related_messages = search_messages_by_topic(clean_topic)
 
         # Логируем найденные сообщения
-        logger.info(f"Найденные сообщения по теме '{user_question}': {related_messages}")
+        logger.info(f"Найденные сообщения по теме '{clean_topic}': {related_messages}")
 
         if not related_messages:
             update.message.reply_text("Не удалось найти сообщения, связанные с вашим вопросом.")
