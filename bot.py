@@ -23,8 +23,6 @@ DB_PASSWORD = config('DB_PASSWORD')
 DB_HOST = config('DB_HOST')
 DB_PORT = config('DB_PORT')
 
-FIXED_USER_ID = config('FIXED_USER_ID', cast=int)  # загружаем user_id из .env
-
 # Подключение к базе данных PostgreSQL
 try:
     conn = psycopg2.connect(
@@ -39,28 +37,47 @@ except Exception as e:
     logger.error(f"Ошибка подключения к базе данных: {e}")
     exit(1)
 
-def get_user_messages():
+def search_messages_by_topic(topic, limit=10):
+    """Поиск сообщений в базе данных, содержащих ключевые слова из вопроса."""
     try:
         with conn.cursor() as cur:
-            query = "SELECT text FROM messages WHERE user_id = %s AND text IS NOT NULL ORDER BY date ASC"
-            cur.execute(query, (FIXED_USER_ID,))
+            query = """
+                SELECT text
+                FROM messages
+                WHERE text ILIKE %s
+                ORDER BY date ASC
+                LIMIT %s
+            """
+            search_pattern = f"%{topic}%"  # поиск фразы в любом месте сообщения
+            cur.execute(query, (search_pattern, limit))
             messages = cur.fetchall()
             return [msg[0] for msg in messages if msg[0]]
     except Exception as e:
-        logger.error(f"Ошибка при получении сообщений пользователя: {e}")
+        logger.error(f"Ошибка при поиске сообщений по теме: {e}")
         return []
 
-def generate_answer(user_messages, user_question):
+def truncate_messages(messages, max_chars=1000):
+    """Усечение сообщений до максимального количества символов"""
+    combined_messages = " ".join(messages)
+    if len(combined_messages) > max_chars:
+        return combined_messages[:max_chars] + "..."
+    return combined_messages
+
+def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
+    """Генерация ответа на основе сообщений, содержащих ключевые слова из вопроса."""
+    # Урезаем найденные сообщения, чтобы не превышать лимит символов
+    truncated_messages = truncate_messages(related_messages, max_chars)
+
     prompt = "Вы — помощник, который отвечает на вопросы пользователя, основываясь на его предыдущих сообщениях.\n\n"
-    prompt += "Предыдущие сообщения пользователя:\n"
-    prompt += "\n".join(user_messages)
+    prompt += "Сообщения, содержащие информацию по теме:\n"
+    prompt += "\n".join(truncated_messages)
     prompt += f"\n\nВопрос пользователя: {user_question}\nОтвет:"
 
     try:
         response = openai.Completion.create(
-            engine='gpt-4',
+            engine='gpt-4o-mini',  # Используем gpt-4o-mini
             prompt=prompt,
-            max_tokens=150,
+            max_tokens=150,  # Уменьшаем максимальное количество токенов для экономии
             n=1,
             stop=None,
             temperature=0.7,
@@ -77,24 +94,24 @@ def handle_message(update: Update, context: CallbackContext):
         logger.info(f"handle_message вызван для пользователя {update.effective_user.id} в чате {update.effective_chat.id}")
         logger.info(f"Текст сообщения: {update.message.text}")
 
-        # Получаем ID пользователя, который отправил сообщение
+        # Получаем вопрос пользователя
         user_question = update.message.text.strip()
 
         # Логируем вопрос пользователя
         logger.info(f"Вопрос пользователя: {user_question}")
 
-        # Получаем сообщения пользователя с фиксированным user_id из .env
-        user_messages = get_user_messages()
+        # Поиск сообщений, связанных с темой вопроса
+        related_messages = search_messages_by_topic(user_question)
 
-        # Логируем полученные сообщения из базы данных
-        logger.info(f"Сообщения пользователя: {user_messages}")
+        # Логируем найденные сообщения
+        logger.info(f"Найденные сообщения по теме '{user_question}': {related_messages}")
 
-        if not user_messages:
-            update.message.reply_text("Нет сохраненных сообщений для формирования ответа.")
+        if not related_messages:
+            update.message.reply_text("Не удалось найти сообщения, связанные с вашим вопросом.")
             return
 
-        # Генерируем ответ на основе сообщений пользователя
-        answer = generate_answer(user_messages, user_question)
+        # Генерируем ответ на основе найденных сообщений
+        answer = generate_answer_by_topic(user_question, related_messages)
 
         # Логируем сгенерированный ответ
         logger.info(f"Ответ: {answer}")
