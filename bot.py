@@ -40,6 +40,23 @@ except Exception as e:
     logger.error(f"Ошибка подключения к базе данных: {e}")
     exit(1)
 
+def should_respond_to_message(update: Update) -> bool:
+    """Проверяет, нужно ли отвечать на сообщение (если упомянули бота или это ответ на его сообщение)."""
+    message = update.message
+
+    # 1. Проверяем, если бот упомянут в сообщении
+    if message.entities:
+        for entity in message.entities:
+            if entity.type == 'mention' and message.text[entity.offset:entity.offset + entity.length].lower() == f"@{context.bot.username.lower()}":
+                return True
+
+    # 2. Проверяем, если это ответ на сообщение бота
+    if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
+        return True
+
+    # Если ни одно условие не выполнено, бот не должен отвечать
+    return False
+
 def introduce_typos(text):
     """Функция для добавления случайных ошибок в текст."""
     words = text.split()
@@ -146,6 +163,11 @@ def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
 
 def handle_message(update: Update, context: CallbackContext):
     try:
+        # Проверяем, нужно ли отвечать на это сообщение
+        if not should_respond_to_message(update):
+            logger.info("Сообщение не требует ответа.")
+            return
+
         # Логируем информацию о сообщении
         logger.info(f"handle_message вызван для пользователя {update.effective_user.id} в чате {update.effective_chat.id}")
         logger.info(f"Текст сообщения: {update.message.text}")
