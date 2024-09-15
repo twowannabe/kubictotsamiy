@@ -2,7 +2,7 @@ import logging
 from decouple import config
 import psycopg2
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
-from telegram import Update, MessageEntity
+from telegram import Update
 import openai
 
 # Настройка логирования
@@ -72,6 +72,7 @@ def generate_answer(user_messages, user_question):
 def handle_message(update: Update, context: CallbackContext):
     try:
         logger.info(f"Получено сообщение от пользователя {update.effective_user.id} в чате {update.effective_chat.id}")
+        logger.info(f"Текст сообщения: {update.message.text}")
 
         user_id = update.effective_user.id
         user_question = update.message.text.strip()
@@ -93,6 +94,9 @@ def handle_message(update: Update, context: CallbackContext):
         logger.error(f"Ошибка в handle_message: {e}")
         update.message.reply_text("Извините, произошла ошибка при обработке вашего сообщения.")
 
+def log_update(update: Update, context: CallbackContext):
+    logger.info(f"Получено обновление: {update}")
+
 def error_handler(update: object, context: CallbackContext):
     logger.error(msg="Исключение при обработке обновления:", exc_info=context.error)
 
@@ -100,14 +104,11 @@ def main():
     updater = Updater(token=TELEGRAM_API_TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
-    dispatcher.add_handler(MessageHandler(
-        Filters.text & (
-            Filters.chat_type.private |
-            Filters.entity(MessageEntity.MENTION) |
-            Filters.entity(MessageEntity.TEXT_MENTION)
-        ),
-        handle_message
-    ))
+    # Логирование всех обновлений
+    dispatcher.add_handler(MessageHandler(Filters.all, log_update))
+
+    # Обработчик всех текстовых сообщений
+    dispatcher.add_handler(MessageHandler(Filters.text, handle_message))
 
     dispatcher.add_error_handler(error_handler)
 
