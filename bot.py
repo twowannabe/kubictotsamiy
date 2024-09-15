@@ -40,7 +40,28 @@ except Exception as e:
     logger.error(f"Ошибка подключения к базе данных: {e}")
     exit(1)
 
-def should_respond_to_message(update: Update) -> bool:
+def introduce_typos(text):
+    """Функция для добавления случайных ошибок в текст."""
+    words = text.split()
+
+    for i, word in enumerate(words):
+        if word == "и" and random.random() < 0.3:
+            continue
+        if random.random() < 0.2:
+            if 'с' in word:
+                words[i] = word.replace('с', 'з')
+            if 'в' in word:
+                words[i] = word.replace('в', 'ф')
+
+    return ' '.join(words)
+
+def randomize_case(text):
+    """Случайным образом меняет регистр первой буквы в предложении."""
+    if random.random() < 0.5:
+        return text[0].lower() + text[1:]
+    return text
+
+def should_respond_to_message(update: Update, context: CallbackContext) -> bool:
     """Проверяет, нужно ли отвечать на сообщение (если упомянули бота или это ответ на его сообщение)."""
     message = update.message
 
@@ -57,47 +78,18 @@ def should_respond_to_message(update: Update) -> bool:
     # Если ни одно условие не выполнено, бот не должен отвечать
     return False
 
-def introduce_typos(text):
-    """Функция для добавления случайных ошибок в текст."""
-    words = text.split()
-
-    for i, word in enumerate(words):
-        # Пропуск запятых перед "и" или случайное изменение слов
-        if word == "и" and random.random() < 0.3:
-            continue  # Убираем запятую перед "и"
-        # Намеренная ошибка: заменяем "в" на "ф" или "с" на "з"
-        if random.random() < 0.2:
-            if 'с' in word:
-                words[i] = word.replace('с', 'з')
-            if 'в' in word:
-                words[i] = word.replace('в', 'ф')
-
-    return ' '.join(words)
-
-def randomize_case(text):
-    """Случайным образом меняет регистр первой буквы в предложении."""
-    if random.random() < 0.5:
-        return text[0].lower() + text[1:]
-    return text
-
 def extract_keywords(question):
     """Извлекает ключевые слова из вопроса для поиска."""
-    # Разделяем на слова
     keywords = question.split()
-    # Выбираем последнее слово
     if keywords:
         last_word = keywords[-1]
-        # Удаляем знак препинания в конце, если он есть
         last_word = last_word.rstrip(string.punctuation)
         return last_word
-    return question  # Если что-то пошло не так, возвращаем полный вопрос
+    return question
 
-# Функция для очистки вопроса
 def clean_question(question):
     """Удаляет упоминания и специальные символы из вопроса."""
-    # Удаление упоминаний бота (@username)
     question = re.sub(r'@\w+', '', question)
-    # Удаление лишних пробелов
     question = question.strip()
     return question
 
@@ -112,7 +104,7 @@ def search_messages_by_topic(topic, limit=10):
                 ORDER BY date ASC
                 LIMIT %s
             """
-            search_pattern = f"%{topic}%"  # поиск фразы в любом месте сообщения
+            search_pattern = f"%{topic}%"
             cur.execute(query, (search_pattern, limit))
             messages = cur.fetchall()
             return [msg[0] for msg in messages if msg[0]]
@@ -131,7 +123,6 @@ def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
     """Генерация ответа на основе сообщений, содержащих ключевые слова из вопроса."""
     truncated_messages = truncate_messages(related_messages, max_chars)
 
-    # Формируем prompt для создания "мнения автора", сохраняя стиль и добавляя ошибки
     prompt = "На основе приведенных ниже сообщений пользователя, сформулируйте связное мнение от его имени, сохраняя стиль, пунктуацию и грамматику сообщений, а также добавьте случайные ошибки для имитации человеческого текста.\n\n"
     prompt += "Сообщения пользователя:\n"
     prompt += "\n".join(truncated_messages)
@@ -151,9 +142,7 @@ def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
         )
         answer = response['choices'][0]['message']['content'].strip()
 
-        # Применяем случайное использование заглавных/строчных букв
         answer = randomize_case(answer)
-        # Внедряем намеренные ошибки в текст
         answer = introduce_typos(answer)
 
         return answer
@@ -164,7 +153,7 @@ def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
 def handle_message(update: Update, context: CallbackContext):
     try:
         # Проверяем, нужно ли отвечать на это сообщение
-        if not should_respond_to_message(update):
+        if not should_respond_to_message(update, context):
             logger.info("Сообщение не требует ответа.")
             return
 
