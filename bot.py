@@ -6,6 +6,7 @@ from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
 from telegram import Update
 import openai
 import string
+import random
 
 # Настройка логирования
 logging.basicConfig(
@@ -38,6 +39,29 @@ try:
 except Exception as e:
     logger.error(f"Ошибка подключения к базе данных: {e}")
     exit(1)
+
+def introduce_typos(text):
+    """Функция для добавления случайных ошибок в текст."""
+    words = text.split()
+
+    for i, word in enumerate(words):
+        # Пропуск запятых перед "и" или случайное изменение слов
+        if word == "и" and random.random() < 0.3:
+            continue  # Убираем запятую перед "и"
+        # Намеренная ошибка: заменяем "в" на "ф" или "с" на "з"
+        if random.random() < 0.2:
+            if 'с' in word:
+                words[i] = word.replace('с', 'з')
+            if 'в' in word:
+                words[i] = word.replace('в', 'ф')
+
+    return ' '.join(words)
+
+def randomize_case(text):
+    """Случайным образом меняет регистр первой буквы в предложении."""
+    if random.random() < 0.5:
+        return text[0].lower() + text[1:]
+    return text
 
 def extract_keywords(question):
     """Извлекает ключевые слова из вопроса для поиска."""
@@ -88,28 +112,33 @@ def truncate_messages(messages, max_chars=1000):
 
 def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
     """Генерация ответа на основе сообщений, содержащих ключевые слова из вопроса."""
-    # Урезаем найденные сообщения, чтобы не превышать лимит символов
     truncated_messages = truncate_messages(related_messages, max_chars)
 
-    # Формируем prompt для создания "мнения автора" на основе сообщений, сохраняя их стиль
-    prompt = "На основе приведенных ниже сообщений пользователя, сформулируйте связное мнение от его имени, сохраняя стиль, пунктуацию и грамматику сообщений. Используйте только эти сообщения для формирования ответа.\n\n"
+    # Формируем prompt для создания "мнения автора", сохраняя стиль и добавляя ошибки
+    prompt = "На основе приведенных ниже сообщений пользователя, сформулируйте связное мнение от его имени, сохраняя стиль, пунктуацию и грамматику сообщений, а также добавьте случайные ошибки для имитации человеческого текста.\n\n"
     prompt += "Сообщения пользователя:\n"
     prompt += "\n".join(truncated_messages)
     prompt += f"\n\nВопрос пользователя: {user_question}\nОтвет от имени автора, с сохранением его стиля и ошибок:"
 
     try:
         response = openai.ChatCompletion.create(
-            model='gpt-4o-mini',  # Используем gpt-4o-mini или другую поддерживаемую модель
+            model='gpt-4o-mini',
             messages=[
-                {"role": "system", "content": "Вы помощник, который формирует связное мнение на основе сообщений пользователя, сохраняя его стиль, пунктуацию и грамматику."},
+                {"role": "system", "content": "Вы помощник, который формирует связное мнение на основе сообщений пользователя, сохраняя его стиль, пунктуацию и грамматику. Добавляйте случайные ошибки, чтобы текст выглядел естественным."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=150,  # Ограничиваем количество токенов для экономии
+            max_tokens=150,
             n=1,
             stop=None,
-            temperature=0.7,  # Низкая температура для более точных ответов
+            temperature=0.7,
         )
         answer = response['choices'][0]['message']['content'].strip()
+
+        # Применяем случайное использование заглавных/строчных букв
+        answer = randomize_case(answer)
+        # Внедряем намеренные ошибки в текст
+        answer = introduce_typos(answer)
+
         return answer
     except Exception as e:
         logger.error(f"Ошибка при запросе к OpenAI API: {e}")
