@@ -1,11 +1,11 @@
 import logging
 import re
-import string
 from decouple import config
 import psycopg2
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
 from telegram import Update
 import openai
+import string
 
 # Настройка логирования
 logging.basicConfig(
@@ -39,15 +39,6 @@ except Exception as e:
     logger.error(f"Ошибка подключения к базе данных: {e}")
     exit(1)
 
-# Функция для очистки вопроса
-def clean_question(question):
-    """Удаляет упоминания и специальные символы из вопроса."""
-    # Удаление упоминаний бота (@username)
-    question = re.sub(r'@\w+', '', question)
-    # Удаление лишних пробелов
-    question = question.strip()
-    return question
-
 def extract_keywords(question):
     """Извлекает ключевые слова из вопроса для поиска."""
     # Разделяем на слова
@@ -60,6 +51,15 @@ def extract_keywords(question):
         return last_word
     return question  # Если что-то пошло не так, возвращаем полный вопрос
 
+# Функция для очистки вопроса
+def clean_question(question):
+    """Удаляет упоминания и специальные символы из вопроса."""
+    # Удаление упоминаний бота (@username)
+    question = re.sub(r'@\w+', '', question)
+    # Удаление лишних пробелов
+    question = question.strip()
+    return question
+
 def search_messages_by_topic(topic, limit=10):
     """Поиск сообщений в базе данных, содержащих ключевые слова из вопроса."""
     try:
@@ -68,15 +68,12 @@ def search_messages_by_topic(topic, limit=10):
                 SELECT text
                 FROM messages
                 WHERE text ILIKE %s
-                AND user_id = 99162494  -- добавляем фиксированный user_id для поиска
                 ORDER BY date ASC
                 LIMIT %s
             """
             search_pattern = f"%{topic}%"  # поиск фразы в любом месте сообщения
-            logger.info(f"SQL запрос: {query} с параметрами: {search_pattern}, {limit}")  # Логируем SQL-запрос и параметры
             cur.execute(query, (search_pattern, limit))
             messages = cur.fetchall()
-            logger.info(f"Результаты поиска в базе данных: {messages}")  # Логируем результаты
             return [msg[0] for msg in messages if msg[0]]
     except Exception as e:
         logger.error(f"Ошибка при поиске сообщений по теме: {e}")
