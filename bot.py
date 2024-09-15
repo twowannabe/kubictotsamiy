@@ -5,6 +5,7 @@ import psycopg2
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
 from telegram import Update
 import openai
+import string
 
 # Настройка логирования
 logging.basicConfig(
@@ -40,12 +41,15 @@ except Exception as e:
 
 def extract_keywords(question):
     """Извлекает ключевые слова из вопроса для поиска."""
-    # Пример: разделение на слова и выбор наиболее значимого
+    # Разделяем на слова
     keywords = question.split()
-    # Вернем последнее слово как потенциальное ключевое
+    # Выбираем последнее слово
     if keywords:
-        return keywords[-1]  # Берем последнее слово
-    return question  # Если что-то пойдет не так, возвращаем полный вопрос
+        last_word = keywords[-1]
+        # Удаляем знак препинания в конце, если он есть
+        last_word = last_word.rstrip(string.punctuation)
+        return last_word
+    return question  # Если что-то пошло не так, возвращаем полный вопрос
 
 # Функция для очистки вопроса
 def clean_question(question):
@@ -93,15 +97,18 @@ def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
     prompt += f"\n\nВопрос пользователя: {user_question}\nОтвет:"
 
     try:
-        response = openai.Completion.create(
-            engine='gpt-4o-mini',  # Используем gpt-4o-mini
-            prompt=prompt,
+        response = openai.ChatCompletion.create(
+            model='gpt-4o-mini',  # Используем gpt-4o-mini или другую поддерживаемую модель
+            messages=[
+                {"role": "system", "content": "Вы — помощник, который отвечает на вопросы пользователя."},
+                {"role": "user", "content": prompt}
+            ],
             max_tokens=150,  # Уменьшаем максимальное количество токенов для экономии
             n=1,
             stop=None,
             temperature=0.7,
         )
-        answer = response.choices[0].text.strip()
+        answer = response['choices'][0]['message']['content'].strip()
         return answer
     except Exception as e:
         logger.error(f"Ошибка при запросе к OpenAI API: {e}")
