@@ -2,7 +2,7 @@ import logging
 from decouple import config
 import psycopg2
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
-from telegram import Update
+from telegram import Update, MessageEntity
 import openai
 
 # Настройка логирования
@@ -38,12 +38,6 @@ except Exception as e:
     exit(1)
 
 def get_user_messages(user_id):
-    """
-    Получает список сообщений пользователя из базы данных.
-
-    :param user_id: Идентификатор пользователя Telegram
-    :return: Список строковых сообщений
-    """
     try:
         with conn.cursor() as cur:
             query = "SELECT text FROM messages WHERE user_id = %s AND text IS NOT NULL ORDER BY date ASC"
@@ -55,14 +49,6 @@ def get_user_messages(user_id):
         return []
 
 def generate_answer(user_messages, user_question):
-    """
-    Генерирует ответ с помощью OpenAI API на основе сообщений пользователя и его вопроса.
-
-    :param user_messages: Список сообщений пользователя
-    :param user_question: Текущий вопрос пользователя
-    :return: Сгенерированный ответ
-    """
-    # Формируем prompt для OpenAI
     prompt = "Вы — помощник, который отвечает на вопросы пользователя, основываясь на его предыдущих сообщениях.\n\n"
     prompt += "Предыдущие сообщения пользователя:\n"
     prompt += "\n".join(user_messages)
@@ -84,54 +70,47 @@ def generate_answer(user_messages, user_question):
         return "Извините, произошла ошибка при генерации ответа."
 
 def handle_message(update: Update, context: CallbackContext):
-    """
-    Обрабатывает входящие сообщения от пользователя.
+    try:
+        logger.info(f"Получено сообщение от пользователя {update.effective_user.id} в чате {update.effective_chat.id}")
 
-    :param update: Объект обновления Telegram
-    :param context: Контекст вызова
-    """
-    user_id = update.effective_user.id
-    user_question = update.message.text.strip()
+        user_id = update.effective_user.id
+        user_question = update.message.text.strip()
 
-    logger.info(f"Получен вопрос от пользователя {user_id}: {user_question}")
+        # Получаем сообщения пользователя из базы данных
+        user_messages = get_user_messages(user_id)
 
-    # Получаем сообщения пользователя из базы данных
-    user_messages = get_user_messages(user_id)
+        if not user_messages:
+            update.message.reply_text("У вас еще нет сохраненных сообщений для формирования ответа.")
+            return
 
-    if not user_messages:
-        update.message.reply_text("У вас еще нет сохраненных сообщений для формирования ответа.")
-        return
+        # Генерируем ответ на основе сообщений пользователя
+        answer = generate_answer(user_messages, user_question)
 
-    # Генерируем ответ на основе сообщений пользователя
-    answer = generate_answer(user_messages, user_question)
+        # Отправляем ответ пользователю
+        update.message.reply_text(answer)
 
-    # Отправляем ответ пользователю
-    update.message.reply_text(answer)
+    except Exception as e:
+        logger.error(f"Ошибка в handle_message: {e}")
+        update.message.reply_text("Извините, произошла ошибка при обработке вашего сообщения.")
 
 def error_handler(update: object, context: CallbackContext):
-    """
-    Логирует ошибки, возникающие при обработке обновлений.
-
-    :param update: Объект обновления Telegram
-    :param context: Контекст вызова
-    """
     logger.error(msg="Исключение при обработке обновления:", exc_info=context.error)
 
 def main():
-    """
-    Запускает бота.
-    """
-    # Инициализируем бота
     updater = Updater(token=TELEGRAM_API_TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
-    # Добавляем обработчик сообщений
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    dispatcher.add_handler(MessageHandler(
+        Filters.text & (
+            Filters.chat_type.private |
+            Filters.entity(MessageEntity.MENTION) |
+            Filters.entity(MessageEntity.TEXT_MENTION)
+        ),
+        handle_message
+    ))
 
-    # Добавляем обработчик ошибок
     dispatcher.add_error_handler(error_handler)
 
-    # Запускаем бота
     updater.start_polling()
     logger.info("Бот запущен. Нажмите Ctrl+C для остановки.")
     updater.idle()
