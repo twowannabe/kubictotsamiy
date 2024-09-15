@@ -38,6 +38,15 @@ except Exception as e:
     logger.error(f"Ошибка подключения к базе данных: {e}")
     exit(1)
 
+def extract_keywords(question):
+    """Извлекает ключевые слова из вопроса для поиска."""
+    # Пример: разделение на слова и выбор наиболее значимого
+    keywords = question.split()
+    # Вернем последнее слово как потенциальное ключевое
+    if keywords:
+        return keywords[-1]  # Берем последнее слово
+    return question  # Если что-то пойдет не так, возвращаем полный вопрос
+
 # Функция для очистки вопроса
 def clean_question(question):
     """Удаляет упоминания и специальные символы из вопроса."""
@@ -108,14 +117,17 @@ def handle_message(update: Update, context: CallbackContext):
         user_question = update.message.text.strip()
         clean_topic = clean_question(user_question)
 
-        # Логируем очищенный вопрос
-        logger.info(f"Очищенный вопрос пользователя: {clean_topic}")
+        # Извлекаем ключевые слова
+        extracted_keyword = extract_keywords(clean_topic)
 
-        # Поиск сообщений, связанных с темой вопроса
-        related_messages = search_messages_by_topic(clean_topic)
+        # Логируем ключевые слова
+        logger.info(f"Ключевое слово для поиска: {extracted_keyword}")
+
+        # Поиск сообщений, связанных с ключевым словом
+        related_messages = search_messages_by_topic(extracted_keyword)
 
         # Логируем найденные сообщения
-        logger.info(f"Найденные сообщения по теме '{clean_topic}': {related_messages}")
+        logger.info(f"Найденные сообщения по теме '{extracted_keyword}': {related_messages}")
 
         if not related_messages:
             update.message.reply_text("Не удалось найти сообщения, связанные с вашим вопросом.")
