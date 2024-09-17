@@ -100,7 +100,7 @@ def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
 
     try:
         response = openai.Completion.create(
-            model="text-davinci-003",
+            model="gpt-4o-mini",
             prompt=prompt,
             max_tokens=150,
             n=1,
