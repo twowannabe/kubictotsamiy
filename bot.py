@@ -26,8 +26,8 @@ def check_and_remove_mute():
     for user in to_remove:
         del muted_users[user]
 
-def delete_muted_user_message(update: Update, context: CallbackContext):
-    """Удаляет сообщения замьюченных пользователей"""
+def delete_muted_user_message(update: Update, context: CallbackContext) -> bool:
+    """Удаляет сообщения замьюченных пользователей и возвращает True, если сообщение было удалено"""
     check_and_remove_mute()  # Проверяем актуальность мьюта
 
     username = update.message.from_user.username
@@ -37,8 +37,11 @@ def delete_muted_user_message(update: Update, context: CallbackContext):
         try:
             context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
             logger.info(f"Сообщение от {username} было удалено, так как он замьючен.")
+            return True  # Возвращаем True, если сообщение было удалено
         except Exception as e:
             logger.error(f"Ошибка при удалении сообщения от {username}: {e}")
+            return False
+    return False  # Возвращаем False, если сообщение не было удалено
 
 def mute_user(update: Update, context: CallbackContext):
     """Команда для мьюта пользователя"""
@@ -61,11 +64,11 @@ def mute_user(update: Update, context: CallbackContext):
 
 def handle_message(update: Update, context: CallbackContext):
     """Простая обработка сообщений"""
-    # Проверяем, не замьючен ли пользователь и удаляем его сообщение, если нужно
-    delete_muted_user_message(update, context)
+    # Проверяем, не замьючен ли пользователь, и удаляем его сообщение, если нужно
+    message_deleted = delete_muted_user_message(update, context)
 
-    # Если сообщение пользователя не было удалено, отправляем ответ
-    if update.message and not update.message.deleted:  # Убедимся, что сообщение еще существует
+    # Если сообщение не было удалено, отправляем ответ
+    if not message_deleted:
         logger.info(f"Получено сообщение от {update.message.from_user.username}: {update.message.text}")
         update.message.reply_text("Я получил ваше сообщение!")
 
