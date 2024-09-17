@@ -69,11 +69,13 @@ def should_respond_to_message(update: Update, context: CallbackContext) -> bool:
     """Проверяет, нужно ли отвечать на сообщение (если упомянули бота или это ответ на его сообщение)."""
     message = update.message
     bot_username = context.bot.username.lower()
+    logger.info(f"Имя бота: {bot_username}")
 
     # 1. Проверяем, если бот упомянут в сообщении
     if message.entities:
         for entity in message.entities:
             mention = message.text[entity.offset:entity.offset + entity.length].lower()
+            logger.info(f"Упоминание в сообщении: {mention}")
             if entity.type == 'mention' and mention == f"@{bot_username}":
                 logger.info(f"Бот был упомянут: {mention}")
                 return True
@@ -162,6 +164,7 @@ def generate_answer_by_topic(user_question, related_messages, user_id, max_chars
     prompt += f"\n\nВопрос пользователя: {user_question}\nОтвет от имени автора, с сохранением его стиля и ошибок:"
 
     try:
+        logger.info(f"Запрос к OpenAI API: {prompt}")
         response = openai.ChatCompletion.create(
             model='gpt-4o-mini',
             messages=[
@@ -178,6 +181,7 @@ def generate_answer_by_topic(user_question, related_messages, user_id, max_chars
         answer = randomize_case(answer)
         answer = introduce_typos(answer)
 
+        logger.info(f"Ответ от OpenAI API: {answer}")
         return answer
     except Exception as e:
         logger.error(f"Ошибка при запросе к OpenAI API: {e}")
