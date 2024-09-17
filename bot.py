@@ -2,6 +2,7 @@ import logging
 from decouple import config
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext, CommandHandler
 from telegram import Update
+from datetime import datetime, timedelta  # Импорт для работы с временем
 
 # Настройка логирования
 logging.basicConfig(
@@ -13,10 +14,8 @@ logger = logging.getLogger(__name__)
 # Загрузка переменных из .env файла
 TELEGRAM_API_TOKEN = config('TELEGRAM_API_TOKEN')
 
-def handle_message(update: Update, context: CallbackContext):
-    """Простая обработка сообщений, чтобы проверить работу бота"""
-    logger.info(f"Получено сообщение от {update.message.from_user.username}: {update.message.text}")
-    update.message.reply_text("Я получил ваше сообщение!")
+# Список замьюченных пользователей
+muted_users = {}
 
 def mute_user(update: Update, context: CallbackContext):
     """Команда для мьюта пользователя"""
@@ -36,6 +35,11 @@ def mute_user(update: Update, context: CallbackContext):
     except Exception as e:
         logger.error(f"Ошибка в mute_user: {e}")
         update.message.reply_text("Произошла ошибка при выполнении команды.")
+
+def handle_message(update: Update, context: CallbackContext):
+    """Простая обработка сообщений, чтобы проверить работу бота"""
+    logger.info(f"Получено сообщение от {update.message.from_user.username}: {update.message.text}")
+    update.message.reply_text("Я получил ваше сообщение!")
 
 def main():
     updater = Updater(token=TELEGRAM_API_TOKEN, use_context=True)
