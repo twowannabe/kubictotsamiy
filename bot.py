@@ -85,19 +85,22 @@ def should_respond_to_message(update: Update, context: CallbackContext) -> bool:
     return False
 
 def extract_topic_from_question(question):
-    """Использует OpenAI для анализа вопроса и извлечения основной темы"""
+    """Использует OpenAI для анализа вопроса и извлечения основной темы с помощью чат-модели"""
     prompt = f"Определи ключевую тему вопроса: '{question}' и верни только ключевую тему одним словом."
 
     try:
-        response = openai.Completion.create(
+        response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
-            prompt=prompt,
+            messages=[
+                {"role": "system", "content": "Ты помощник, который извлекает ключевую тему вопроса."},
+                {"role": "user", "content": prompt}
+            ],
             max_tokens=5,
             n=1,
             stop=None,
             temperature=0.5
         )
-        topic = response['choices'][0]['text'].strip()
+        topic = response['choices'][0]['message']['content'].strip()
         return topic
     except Exception as e:
         logger.error(f"Ошибка при анализе темы вопроса с помощью OpenAI: {e}")
