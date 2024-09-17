@@ -267,6 +267,10 @@ def mute_user(update: Update, context: CallbackContext):
         logger.error(f"Ошибка в mute_user: {e}")
         update.message.reply_text("Произошла ошибка при выполнении команды.")
 
+def error_handler(update: object, context: CallbackContext):
+    """Логирует все исключения, которые возникают во время обработки сообщений."""
+    logger.error(msg="Исключение при обработке обновления:", exc_info=context.error)
+
 def main():
     updater = Updater(token=TELEGRAM_API_TOKEN, use_context=True)
     dispatcher = updater.dispatcher
@@ -280,6 +284,7 @@ def main():
     # Обработчик для удаления сообщений замьюченных пользователей
     dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), delete_muted_user_message))
 
+    # Обработчик ошибок
     dispatcher.add_error_handler(error_handler)
 
     updater.start_polling()
