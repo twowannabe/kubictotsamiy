@@ -61,9 +61,13 @@ def mute_user(update: Update, context: CallbackContext):
 
 def handle_message(update: Update, context: CallbackContext):
     """Простая обработка сообщений"""
-    delete_muted_user_message(update, context)  # Проверяем, не замьючен ли пользователь
-    logger.info(f"Получено сообщение от {update.message.from_user.username}: {update.message.text}")
-    update.message.reply_text("Я получил ваше сообщение!")
+    # Проверяем, не замьючен ли пользователь и удаляем его сообщение, если нужно
+    delete_muted_user_message(update, context)
+
+    # Если сообщение пользователя не было удалено, отправляем ответ
+    if update.message and not update.message.deleted:  # Убедимся, что сообщение еще существует
+        logger.info(f"Получено сообщение от {update.message.from_user.username}: {update.message.text}")
+        update.message.reply_text("Я получил ваше сообщение!")
 
 def main():
     updater = Updater(token=TELEGRAM_API_TOKEN, use_context=True)
