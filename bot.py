@@ -2,11 +2,12 @@ import logging
 import re
 from decouple import config
 import psycopg2
-from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
+from telegram.ext import Updater, MessageHandler, Filters, CallbackContext, CommandHandler
 from telegram import Update
 import openai
 import string
 import random
+from datetime import datetime, timedelta
 
 # Настройка логирования
 logging.basicConfig(
@@ -40,21 +41,8 @@ except Exception as e:
     logger.error(f"Ошибка подключения к базе данных: {e}")
     exit(1)
 
-def get_average_message_length(user_id):
-    """Извлекает среднюю длину сообщений пользователя из базы данных."""
-    try:
-        with conn.cursor() as cur:
-            query = """
-                SELECT AVG(CHAR_LENGTH(text))
-                FROM messages
-                WHERE user_id = %s
-            """
-            cur.execute(query, (user_id,))
-            avg_length = cur.fetchone()[0]
-            return avg_length if avg_length else 100  # Возвращаем 100 по умолчанию
-    except Exception as e:
-        logger.error(f"Ошибка при извлечении средней длины сообщений: {e}")
-        return 100  # Значение по умолчанию
+# Список замьюченных пользователей
+muted_users = {}
 
 def introduce_typos(text):
     """Функция для добавления случайных ошибок в текст."""
@@ -91,7 +79,6 @@ def should_respond_to_message(update: Update, context: CallbackContext) -> bool:
     if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
         return True
 
-    # Если ни одно условие не выполнено, бот не должен отвечать
     return False
 
 def extract_keywords(question):
@@ -134,6 +121,28 @@ def truncate_messages(messages, max_chars=1000):
     if len(combined_messages) > max_chars:
         return combined_messages[:max_chars] + "..."
     return combined_messages
+
+def truncate_to_max_chars(text, max_chars=200):
+    """Ограничивает длину текста до определенного количества символов"""
+    if len(text) > max_chars:
+        return text[:max_chars] + "..."
+    return text
+
+def get_average_message_length(user_id):
+    """Извлекает среднюю длину сообщений пользователя из базы данных."""
+    try:
+        with conn.cursor() as cur:
+            query = """
+                SELECT AVG(CHAR_LENGTH(text))
+                FROM messages
+                WHERE user_id = %s
+            """
+            cur.execute(query, (user_id,))
+            avg_length = cur.fetchone()[0]
+            return avg_length if avg_length else 100  # Возвращаем 100 по умолчанию
+    except Exception as e:
+        logger.error(f"Ошибка при извлечении средней длины сообщений: {e}")
+        return 100  # Значение по умолчанию
 
 def generate_answer_by_topic(user_question, related_messages, user_id, max_chars=1000):
     """Генерация ответа на основе сообщений, содержащих ключевые слова из вопроса."""
@@ -185,11 +194,11 @@ def handle_message(update: Update, context: CallbackContext):
             update.message.reply_text("Не удалось найти сообщения, связанные с вашим вопросом.")
             return
 
-        # Получаем user_id для анализа длины сообщений
         user_id = update.message.from_user.id
-
-        # Генерируем ответ с учётом средней длины сообщений пользователя
         answer = generate_answer_by_topic(user_question, related_messages, user_id)
+
+        # Ограничение длины ответа
+        answer = truncate_to_max_chars(answer, max_chars=200)
 
         update.message.reply_text(answer)
 
@@ -197,30 +206,83 @@ def handle_message(update: Update, context: CallbackContext):
         logger.error(f"Ошибка в handle_message: {e}")
         update.message.reply_text("Извините, произошла ошибка при обработке вашего сообщения.")
 
+def log_all_messages(update: Update, context: CallbackContext):
+    """Логирование всех сообщений."""
+    user = update.message.from_user
+    message_text = update.message.text if update.message.text else "Не текстовое сообщение"
+
+    # Логирование информации о пользователе и тексте сообщения
+    logger.info(f"Получено сообщение от {user.username} ({user.id}): {message_text}")
+
+    # Если это не текстовое сообщение, можем дополнительно логировать тип контента
+    if update.message.sticker:
+        logger.info(f"Стикер: {update.message.sticker.emoji}")
+    elif update.message.photo:
+        logger.info(f"Фото от пользователя {user.username}")
+    elif update.message.video:
+        logger.info(f"Видео от пользователя {user.username}")
+    elif update.message.document:
+        logger.info(f"Документ от пользователя {user.username}")
+    elif update.message.voice:
+        logger.info(f"Голосовое сообщение от пользователя {user.username}")
+    elif update.message.location:
+        logger.info(f"Локация от пользователя {user.username}")
+
+def check_and_remove_mute():
+    """Проверяет время и снимает мьют с пользователей"""
+    now = datetime.now()
+    to_remove = [user for user, unmute_time in muted_users.items() if now >= unmute_time]
+
+    for user in to_remove:
+        del muted_users[user]
+
+def delete_muted_user_message(update: Update, context: CallbackContext):
+    """Удаляет сообщения замьюченных пользователей"""
+    check_and_remove_mute()
+
+    if update.message.from_user.username in muted_users:
+        # Удаляем сообщение
+        try:
+            context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
+            logger.info(f"Сообщение от {update.message.from_user.username} было удалено, так как он замьючен.")
+        except Exception as e:
+            logger.error(f"Ошибка при удалении сообщения: {e}")
+
+def mute_user(update: Update, context: CallbackContext):
+    """Команда для мьюта пользователя"""
+    try:
+        if not context.args or len(context.args) < 2:
+            update.message.reply_text("Использование: /mute username minutes")
+            return
+
+        username = context.args[0].lstrip('@')
+        mute_duration = int(context.args[1])
+
+        # Определяем, когда снять мьют
+        unmute_time = datetime.now() + timedelta(minutes=mute_duration)
+        muted_users[username] = unmute_time
+
+        update.message.reply_text(f"Пользователь {username} замьючен на {mute_duration} минут.")
     except Exception as e:
-        logger.error(f"Ошибка в handle_message: {e}")
-        update.message.reply_text("Извините, произошла ошибка при обработке вашего сообщения.")
-
-def log_update(update: Update, context: CallbackContext):
-    logger.info(f"Получено обновление: {update}")
-
-def error_handler(update: object, context: CallbackContext):
-    logger.error(msg="Исключение при обработке обновления:", exc_info=context.error)
+        logger.error(f"Ошибка в mute_user: {e}")
+        update.message.reply_text("Произошла ошибка при выполнении команды.")
 
 def main():
     updater = Updater(token=TELEGRAM_API_TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
-    # Изменяем фильтр, чтобы он ловил любые текстовые сообщения, кроме команд
-    dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), handle_message))
+    # Обработчик команд
+    dispatcher.add_handler(CommandHandler('mute', mute_user))
 
-    # Логирование всех обновлений
-    dispatcher.add_handler(MessageHandler(Filters.all, log_update))
+    # Обработчик для логирования всех сообщений
+    dispatcher.add_handler(MessageHandler(Filters.all, log_all_messages))
+
+    # Обработчик для удаления сообщений замьюченных пользователей
+    dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), delete_muted_user_message))
 
     dispatcher.add_error_handler(error_handler)
 
     updater.start_polling()
-    logger.info("Бот запущен. Нажмите Ctrl+C для остановки.")
     updater.idle()
 
 if __name__ == '__main__':
