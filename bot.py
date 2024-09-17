@@ -292,18 +292,22 @@ def main():
     updater = Updater(token=TELEGRAM_API_TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
-    # Обработчик команд
+    # 1. Обработчик команд
     dispatcher.add_handler(CommandHandler('mute', mute_user))
 
-    # Обработчик для логирования всех сообщений
-    dispatcher.add_handler(MessageHandler(Filters.all, log_all_messages))
-
-    # Обработчик для удаления сообщений замьюченных пользователей
+    # 2. Обработчик для удаления сообщений замьюченных пользователей
     dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), delete_muted_user_message))
 
-    # Обработчик ошибок
+    # 3. Обработчик сообщений, на которые нужно отвечать
+    dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), handle_message))
+
+    # 4. Обработчик для логирования всех сообщений (в конце)
+    dispatcher.add_handler(MessageHandler(Filters.all, log_all_messages))
+
+    # 5. Обработчик ошибок
     dispatcher.add_error_handler(error_handler)
 
+    # Запуск бота
     updater.start_polling()
     updater.idle()
 
