@@ -23,6 +23,9 @@ DB_PASSWORD = config('DB_PASSWORD')
 DB_HOST = config('DB_HOST')
 DB_PORT = config('DB_PORT')
 
+# Фиксированный идентификатор пользователя
+FIXED_USER_ID = int(config('FIXED_USER_ID'))
+
 # Подключение к базе данных PostgreSQL
 try:
     conn = psycopg2.connect(
@@ -67,18 +70,18 @@ def delete_muted_user_message(update: Update, context: CallbackContext) -> bool:
     return False  # Возвращаем False, если сообщение не было удалено
 
 def search_messages_by_topic(topic, limit=10):
-    """Поиск сообщений в базе данных, содержащих ключевые слова из вопроса."""
+    """Поиск сообщений в базе данных, содержащих ключевые слова из вопроса и отправленных фиксированным пользователем."""
     try:
         with conn.cursor() as cur:
             query = """
                 SELECT text
                 FROM messages
-                WHERE text ILIKE %s
+                WHERE text ILIKE %s AND user_id = %s
                 ORDER BY date ASC
                 LIMIT %s
             """
             search_pattern = f"%{topic}%"
-            cur.execute(query, (search_pattern, limit))
+            cur.execute(query, (search_pattern, FIXED_USER_ID, limit))
             messages = cur.fetchall()
             return [msg[0] for msg in messages if msg[0]]
     except Exception as e:
@@ -100,7 +103,7 @@ def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
 
     try:
         response = openai.Completion.create(
-            model="gpt-4o-mini",
+            model="text-davinci-003",
             prompt=prompt,
             max_tokens=150,
             n=1,
@@ -120,6 +123,7 @@ def handle_message(update: Update, context: CallbackContext):
 
     if not message_deleted:
         user_question = update.message.text.strip()
+
         # Пытаемся извлечь сообщения, связанные с вопросом пользователя
         related_messages = search_messages_by_topic(user_question)
 
