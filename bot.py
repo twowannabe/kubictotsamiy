@@ -27,6 +27,8 @@ DB_PORT = config('DB_PORT')
 # Фиксированный идентификатор пользователя
 FIXED_USER_ID = int(config('FIXED_USER_ID'))
 
+AUTHORIZED_USERS = [530674302, 6122780749, 147218177, 336914967]
+
 # Подключение к базе данных PostgreSQL
 try:
     conn = psycopg2.connect(
@@ -226,6 +228,14 @@ def handle_message(update: Update, context: CallbackContext):
 def mute_user(update: Update, context: CallbackContext):
     """Команда для мьюта пользователя"""
     try:
+        user_id = update.message.from_user.id
+
+        # Проверяем, находится ли пользователь в списке авторизованных
+        if user_id not in AUTHORIZED_USERS:
+            logger.info(f"Пользователь {user_id} попытался использовать команду /mute, но не имеет прав.")
+            update.message.reply_text("У вас нет прав на использование этой команды.")
+            return
+
         if not context.args or len(context.args) < 2:
             update.message.reply_text("Использование: /mute username minutes")
             return
@@ -233,6 +243,7 @@ def mute_user(update: Update, context: CallbackContext):
         username = context.args[0].lstrip('@')
         mute_duration = int(context.args[1])
 
+        # Определяем, когда снять мьют
         unmute_time = datetime.now() + timedelta(minutes=mute_duration)
         muted_users[username] = unmute_time
 
