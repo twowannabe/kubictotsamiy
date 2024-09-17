@@ -45,7 +45,7 @@ except Exception as e:
 muted_users = {}
 
 
-def search_messages_by_keywords(keywords, limit=50):
+def search_messages_by_keywords(keywords, limit=1000):
     """Поиск сообщений в базе данных, содержащих одно из ключевых слов и отправленных фиксированным пользователем."""
     try:
         with conn.cursor() as cur:
