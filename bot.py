@@ -17,6 +17,29 @@ TELEGRAM_API_TOKEN = config('TELEGRAM_API_TOKEN')
 # Список замьюченных пользователей
 muted_users = {}
 
+def check_and_remove_mute():
+    """Проверяет время и снимает мьют с пользователей"""
+    now = datetime.now()
+    to_remove = [user for user, unmute_time in muted_users.items() if now >= unmute_time]
+
+    # Удаление пользователей, чей мьют истек
+    for user in to_remove:
+        del muted_users[user]
+
+def delete_muted_user_message(update: Update, context: CallbackContext):
+    """Удаляет сообщения замьюченных пользователей"""
+    check_and_remove_mute()  # Проверяем актуальность мьюта
+
+    username = update.message.from_user.username
+
+    if username in muted_users:
+        # Удаляем сообщение замьюченного пользователя
+        try:
+            context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
+            logger.info(f"Сообщение от {username} было удалено, так как он замьючен.")
+        except Exception as e:
+            logger.error(f"Ошибка при удалении сообщения от {username}: {e}")
+
 def mute_user(update: Update, context: CallbackContext):
     """Команда для мьюта пользователя"""
     try:
@@ -37,7 +60,8 @@ def mute_user(update: Update, context: CallbackContext):
         update.message.reply_text("Произошла ошибка при выполнении команды.")
 
 def handle_message(update: Update, context: CallbackContext):
-    """Простая обработка сообщений, чтобы проверить работу бота"""
+    """Простая обработка сообщений"""
+    delete_muted_user_message(update, context)  # Проверяем, не замьючен ли пользователь
     logger.info(f"Получено сообщение от {update.message.from_user.username}: {update.message.text}")
     update.message.reply_text("Я получил ваше сообщение!")
 
