@@ -68,17 +68,22 @@ def randomize_case(text):
 def should_respond_to_message(update: Update, context: CallbackContext) -> bool:
     """Проверяет, нужно ли отвечать на сообщение (если упомянули бота или это ответ на его сообщение)."""
     message = update.message
+    bot_username = context.bot.username.lower()
 
     # 1. Проверяем, если бот упомянут в сообщении
     if message.entities:
         for entity in message.entities:
-            if entity.type == 'mention' and message.text[entity.offset:entity.offset + entity.length].lower() == f"@{context.bot.username.lower()}":
+            mention = message.text[entity.offset:entity.offset + entity.length].lower()
+            if entity.type == 'mention' and mention == f"@{bot_username}":
+                logger.info(f"Бот был упомянут: {mention}")
                 return True
 
     # 2. Проверяем, если это ответ на сообщение бота
     if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
+        logger.info("Сообщение является ответом на сообщение бота.")
         return True
 
+    logger.info("Бот не был упомянут, и это не ответ на его сообщение.")
     return False
 
 def extract_keywords(question):
@@ -181,7 +186,11 @@ def generate_answer_by_topic(user_question, related_messages, user_id, max_chars
 def handle_message(update: Update, context: CallbackContext):
     try:
         if not should_respond_to_message(update, context):
+            logger.info("Сообщение не требует ответа.")
             return
+
+        # Логируем, что бот решил ответить на сообщение
+        logger.info("Бот готовит ответ на сообщение.")
 
         user_question = update.message.text.strip()
         clean_topic = clean_question(user_question)
@@ -191,6 +200,7 @@ def handle_message(update: Update, context: CallbackContext):
         related_messages = search_messages_by_topic(extracted_keyword)
 
         if not related_messages:
+            logger.info(f"Сообщения, связанные с темой '{extracted_keyword}', не найдены.")
             update.message.reply_text("Не удалось найти сообщения, связанные с вашим вопросом.")
             return
 
@@ -199,6 +209,9 @@ def handle_message(update: Update, context: CallbackContext):
 
         # Ограничение длины ответа
         answer = truncate_to_max_chars(answer, max_chars=200)
+
+        # Логируем сгенерированный ответ
+        logger.info(f"Ответ на сообщение: {answer}")
 
         update.message.reply_text(answer)
 
