@@ -2,7 +2,7 @@ import logging
 from decouple import config
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext, CommandHandler
 from telegram import Update
-from datetime import datetime, timedelta  # Импорт для работы с временем
+from datetime import datetime, timedelta
 import openai
 import psycopg2
 
@@ -54,20 +54,36 @@ def check_and_remove_mute():
 
 def delete_muted_user_message(update: Update, context: CallbackContext) -> bool:
     """Удаляет сообщения замьюченных пользователей и возвращает True, если сообщение было удалено"""
-    check_and_remove_mute()  # Проверяем актуальность мьюта
+    check_and_remove_mute()
 
     username = update.message.from_user.username
 
     if username in muted_users:
-        # Удаляем сообщение замьюченного пользователя
         try:
             context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
             logger.info(f"Сообщение от {username} было удалено, так как он замьючен.")
-            return True  # Возвращаем True, если сообщение было удалено
+            return True
         except Exception as e:
             logger.error(f"Ошибка при удалении сообщения от {username}: {e}")
             return False
-    return False  # Возвращаем False, если сообщение не было удалено
+    return False
+
+def should_respond_to_message(update: Update, context: CallbackContext) -> bool:
+    """Проверяет, нужно ли отвечать на сообщение"""
+    message = update.message
+
+    # Проверяем, упомянули ли бота
+    if message.entities:
+        for entity in message.entities:
+            mention = message.text[entity.offset:entity.offset + entity.length].lower()
+            if entity.type == 'mention' and mention == f"@{context.bot.username.lower()}":
+                return True
+
+    # Проверяем, является ли сообщение ответом на сообщение бота
+    if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
+        return True
+
+    return False
 
 def search_messages_by_topic(topic, limit=10):
     """Поиск сообщений в базе данных, содержащих ключевые слова из вопроса и отправленных фиксированным пользователем."""
@@ -102,15 +118,18 @@ def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
     prompt = f"На основе приведенных ниже сообщений пользователя, сформулируй связное мнение от его имени, сохраняя стиль, пунктуацию и грамматику сообщений. \n\nСообщения пользователя:\n{truncated_messages}\n\nВопрос пользователя: {user_question}\nОтвет:"
 
     try:
-        response = openai.Completion.create(
-            model="text-davinci-003",
-            prompt=prompt,
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Ты помощник, который отвечает от имени пользователя на основании его сообщений."},
+                {"role": "user", "content": prompt}
+            ],
             max_tokens=150,
             n=1,
             stop=None,
             temperature=0.7,
         )
-        answer = response['choices'][0]['text'].strip()
+        answer = response['choices'][0]['message']['content'].strip()
         return answer
     except Exception as e:
         logger.error(f"Ошибка при запросе к OpenAI API: {e}")
@@ -121,7 +140,7 @@ def handle_message(update: Update, context: CallbackContext):
     # Проверяем, не замьючен ли пользователь, и удаляем его сообщение, если нужно
     message_deleted = delete_muted_user_message(update, context)
 
-    if not message_deleted:
+    if not message_deleted and should_respond_to_message(update, context):
         user_question = update.message.text.strip()
 
         # Пытаемся извлечь сообщения, связанные с вопросом пользователя
