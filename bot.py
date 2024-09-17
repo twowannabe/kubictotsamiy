@@ -3,6 +3,8 @@ from decouple import config
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext, CommandHandler
 from telegram import Update
 from datetime import datetime, timedelta  # Импорт для работы с временем
+import openai
+import psycopg2
 
 # Настройка логирования
 logging.basicConfig(
@@ -13,6 +15,27 @@ logger = logging.getLogger(__name__)
 
 # Загрузка переменных из .env файла
 TELEGRAM_API_TOKEN = config('TELEGRAM_API_TOKEN')
+openai.api_key = config('OPENAI_API_KEY')
+
+DB_NAME = config('DB_NAME')
+DB_USER = config('DB_USER')
+DB_PASSWORD = config('DB_PASSWORD')
+DB_HOST = config('DB_HOST')
+DB_PORT = config('DB_PORT')
+
+# Подключение к базе данных PostgreSQL
+try:
+    conn = psycopg2.connect(
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        host=DB_HOST,
+        port=DB_PORT
+    )
+    logger.info("Успешно подключились к базе данных PostgreSQL")
+except Exception as e:
+    logger.error(f"Ошибка подключения к базе данных: {e}")
+    exit(1)
 
 # Список замьюченных пользователей
 muted_users = {}
@@ -43,6 +66,71 @@ def delete_muted_user_message(update: Update, context: CallbackContext) -> bool:
             return False
     return False  # Возвращаем False, если сообщение не было удалено
 
+def search_messages_by_topic(topic, limit=10):
+    """Поиск сообщений в базе данных, содержащих ключевые слова из вопроса."""
+    try:
+        with conn.cursor() as cur:
+            query = """
+                SELECT text
+                FROM messages
+                WHERE text ILIKE %s
+                ORDER BY date ASC
+                LIMIT %s
+            """
+            search_pattern = f"%{topic}%"
+            cur.execute(query, (search_pattern, limit))
+            messages = cur.fetchall()
+            return [msg[0] for msg in messages if msg[0]]
+    except Exception as e:
+        logger.error(f"Ошибка при поиске сообщений по теме: {e}")
+        return []
+
+def truncate_messages(messages, max_chars=1000):
+    """Усечение сообщений до максимального количества символов"""
+    combined_messages = " ".join(messages)
+    if len(combined_messages) > max_chars:
+        return combined_messages[:max_chars] + "..."
+    return combined_messages
+
+def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
+    """Генерация ответа на основе сообщений, содержащих ключевые слова из вопроса."""
+    truncated_messages = truncate_messages(related_messages, max_chars)
+
+    prompt = f"На основе приведенных ниже сообщений пользователя, сформулируй связное мнение от его имени, сохраняя стиль, пунктуацию и грамматику сообщений. \n\nСообщения пользователя:\n{truncated_messages}\n\nВопрос пользователя: {user_question}\nОтвет:"
+
+    try:
+        response = openai.Completion.create(
+            model="text-davinci-003",
+            prompt=prompt,
+            max_tokens=150,
+            n=1,
+            stop=None,
+            temperature=0.7,
+        )
+        answer = response['choices'][0]['text'].strip()
+        return answer
+    except Exception as e:
+        logger.error(f"Ошибка при запросе к OpenAI API: {e}")
+        return "Извините, произошла ошибка при генерации ответа."
+
+def handle_message(update: Update, context: CallbackContext):
+    """Обработка текстовых сообщений"""
+    # Проверяем, не замьючен ли пользователь, и удаляем его сообщение, если нужно
+    message_deleted = delete_muted_user_message(update, context)
+
+    if not message_deleted:
+        user_question = update.message.text.strip()
+        # Пытаемся извлечь сообщения, связанные с вопросом пользователя
+        related_messages = search_messages_by_topic(user_question)
+
+        if related_messages:
+            # Генерируем ответ с помощью OpenAI
+            answer = generate_answer_by_topic(user_question, related_messages)
+            logger.info(f"Ответ: {answer}")
+            update.message.reply_text(answer)
+        else:
+            update.message.reply_text("Не удалось найти сообщения, связанные с вашим вопросом.")
+
 def mute_user(update: Update, context: CallbackContext):
     """Команда для мьюта пользователя"""
     try:
@@ -61,16 +149,6 @@ def mute_user(update: Update, context: CallbackContext):
     except Exception as e:
         logger.error(f"Ошибка в mute_user: {e}")
         update.message.reply_text("Произошла ошибка при выполнении команды.")
-
-def handle_message(update: Update, context: CallbackContext):
-    """Простая обработка сообщений"""
-    # Проверяем, не замьючен ли пользователь, и удаляем его сообщение, если нужно
-    message_deleted = delete_muted_user_message(update, context)
-
-    # Если сообщение не было удалено, отправляем ответ
-    if not message_deleted:
-        logger.info(f"Получено сообщение от {update.message.from_user.username}: {update.message.text}")
-        update.message.reply_text("Я получил ваше сообщение!")
 
 def main():
     updater = Updater(token=TELEGRAM_API_TOKEN, use_context=True)
