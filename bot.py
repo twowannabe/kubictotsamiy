@@ -40,6 +40,22 @@ except Exception as e:
     logger.error(f"Ошибка подключения к базе данных: {e}")
     exit(1)
 
+def get_average_message_length(user_id):
+    """Извлекает среднюю длину сообщений пользователя из базы данных."""
+    try:
+        with conn.cursor() as cur:
+            query = """
+                SELECT AVG(CHAR_LENGTH(text))
+                FROM messages
+                WHERE user_id = %s
+            """
+            cur.execute(query, (user_id,))
+            avg_length = cur.fetchone()[0]
+            return avg_length if avg_length else 100  # Возвращаем 100 по умолчанию
+    except Exception as e:
+        logger.error(f"Ошибка при извлечении средней длины сообщений: {e}")
+        return 100  # Значение по умолчанию
+
 def introduce_typos(text):
     """Функция для добавления случайных ошибок в текст."""
     words = text.split()
@@ -119,9 +135,12 @@ def truncate_messages(messages, max_chars=1000):
         return combined_messages[:max_chars] + "..."
     return combined_messages
 
-def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
+def generate_answer_by_topic(user_question, related_messages, user_id, max_chars=1000):
     """Генерация ответа на основе сообщений, содержащих ключевые слова из вопроса."""
     truncated_messages = truncate_messages(related_messages, max_chars)
+
+    # Получаем среднюю длину сообщений пользователя
+    avg_message_length = get_average_message_length(user_id)
 
     prompt = "На основе приведенных ниже сообщений пользователя, сформулируйте связное мнение от его имени, сохраняя стиль, пунктуацию и грамматику сообщений, а также добавьте случайные ошибки для имитации человеческого текста.\n\n"
     prompt += "Сообщения пользователя:\n"
@@ -135,7 +154,7 @@ def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
                 {"role": "system", "content": "Вы помощник, который формирует связное мнение на основе сообщений пользователя, сохраняя его стиль, пунктуацию и грамматику. Добавляйте случайные ошибки, чтобы текст выглядел естественным."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=150,
+            max_tokens=int(avg_message_length // 2),  # Ограничиваем длину на основе средней длины сообщений
             n=1,
             stop=None,
             temperature=0.7,
@@ -152,43 +171,31 @@ def generate_answer_by_topic(user_question, related_messages, max_chars=1000):
 
 def handle_message(update: Update, context: CallbackContext):
     try:
-        # Проверяем, нужно ли отвечать на это сообщение
         if not should_respond_to_message(update, context):
-            logger.info("Сообщение не требует ответа.")
             return
 
-        # Логируем информацию о сообщении
-        logger.info(f"handle_message вызван для пользователя {update.effective_user.id} в чате {update.effective_chat.id}")
-        logger.info(f"Текст сообщения: {update.message.text}")
-
-        # Получаем вопрос пользователя и очищаем его от упоминаний бота
         user_question = update.message.text.strip()
         clean_topic = clean_question(user_question)
 
-        # Извлекаем ключевые слова
         extracted_keyword = extract_keywords(clean_topic)
 
-        # Логируем ключевые слова
-        logger.info(f"Ключевое слово для поиска: {extracted_keyword}")
-
-        # Поиск сообщений, связанных с ключевым словом
         related_messages = search_messages_by_topic(extracted_keyword)
-
-        # Логируем найденные сообщения
-        logger.info(f"Найденные сообщения по теме '{extracted_keyword}': {related_messages}")
 
         if not related_messages:
             update.message.reply_text("Не удалось найти сообщения, связанные с вашим вопросом.")
             return
 
-        # Генерируем ответ на основе найденных сообщений
-        answer = generate_answer_by_topic(user_question, related_messages)
+        # Получаем user_id для анализа длины сообщений
+        user_id = update.message.from_user.id
 
-        # Логируем сгенерированный ответ
-        logger.info(f"Ответ: {answer}")
+        # Генерируем ответ с учётом средней длины сообщений пользователя
+        answer = generate_answer_by_topic(user_question, related_messages, user_id)
 
-        # Отправляем ответ пользователю
         update.message.reply_text(answer)
+
+    except Exception as e:
+        logger.error(f"Ошибка в handle_message: {e}")
+        update.message.reply_text("Извините, произошла ошибка при обработке вашего сообщения.")
 
     except Exception as e:
         logger.error(f"Ошибка в handle_message: {e}")
