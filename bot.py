@@ -5,8 +5,6 @@ from telegram import Update
 from datetime import datetime, timedelta
 import openai
 import psycopg2
-import random
-import re
 
 # Настройка логирования
 logging.basicConfig(
@@ -86,32 +84,24 @@ def should_respond_to_message(update: Update, context: CallbackContext) -> bool:
 
     return False
 
-def extract_keywords(question):
-    """Извлекает ключевые слова из вопроса"""
-    # Убираем стоп-слова и лишние символы
-    stop_words = {"что", "как", "про", "думаешь", "о", "и", "в", "на", "по", "ты"}
-    words = re.findall(r'\b\w+\b', question.lower())
-    keywords = [word for word in words if word not in stop_words]
+def extract_topic_from_question(question):
+    """Использует OpenAI для анализа вопроса и извлечения основной темы"""
+    prompt = f"Определи ключевую тему вопроса: '{question}' и верни только ключевую тему одним словом."
 
-    # Возвращаем последнее важное слово для поиска
-    return keywords[-1] if keywords else question
-
-def introduce_typos(text):
-    """Добавляет случайные ошибки и меняет регистр для имитации человеческой речи"""
-    words = text.split()
-
-    for i, word in enumerate(words):
-        if random.random() < 0.3:  # 30% шанс сделать ошибку
-            if 'с' in word:
-                words[i] = word.replace('с', 'з')
-            elif 'о' in word:
-                words[i] = word.replace('о', 'а')
-
-    # Случайно меняем регистр первой буквы
-    if random.random() < 0.5:
-        words[0] = words[0].capitalize() if words[0][0].islower() else words[0].lower()
-
-    return ' '.join(words)
+    try:
+        response = openai.Completion.create(
+            model="gpt-4o-mini",
+            prompt=prompt,
+            max_tokens=5,
+            n=1,
+            stop=None,
+            temperature=0.5
+        )
+        topic = response['choices'][0]['text'].strip()
+        return topic
+    except Exception as e:
+        logger.error(f"Ошибка при анализе темы вопроса с помощью OpenAI: {e}")
+        return None
 
 def search_messages_by_topic(topic, limit=10):
     """Поиск сообщений в базе данных, содержащих ключевые слова из вопроса и отправленных фиксированным пользователем."""
@@ -158,9 +148,6 @@ def generate_answer_by_topic(user_question, related_messages, max_chars=500):
             temperature=0.7,
         )
         answer = response['choices'][0]['message']['content'].strip()
-
-        # Добавляем случайные ошибки и сокращаем текст
-        answer = introduce_typos(answer)
         return answer
     except Exception as e:
         logger.error(f"Ошибка при запросе к OpenAI API: {e}")
@@ -168,23 +155,24 @@ def generate_answer_by_topic(user_question, related_messages, max_chars=500):
 
 def handle_message(update: Update, context: CallbackContext):
     """Обработка текстовых сообщений"""
-    # Проверяем, не замьючен ли пользователь, и удаляем его сообщение, если нужно
     message_deleted = delete_muted_user_message(update, context)
 
     if not message_deleted and should_respond_to_message(update, context):
         user_question = update.message.text.strip()
-        keyword = extract_keywords(user_question)
 
-        # Пытаемся извлечь сообщения, связанные с вопросом пользователя
-        related_messages = search_messages_by_topic(keyword)
+        # Используем OpenAI для извлечения темы вопроса
+        topic = extract_topic_from_question(user_question)
 
-        if related_messages:
-            # Генерируем ответ с помощью OpenAI
-            answer = generate_answer_by_topic(user_question, related_messages)
-            if answer:
-                logger.info(f"Ответ: {answer}")
-                update.message.reply_text(answer)
-        # Если нет сообщений или ответа, бот просто не отвечает
+        if topic:
+            related_messages = search_messages_by_topic(topic)
+
+            if related_messages:
+                # Генерируем ответ с помощью OpenAI
+                answer = generate_answer_by_topic(user_question, related_messages)
+                if answer:
+                    logger.info(f"Ответ: {answer}")
+                    update.message.reply_text(answer)
+            # Если нет сообщений или ответа, бот просто не отвечает
 
 def mute_user(update: Update, context: CallbackContext):
     """Команда для мьюта пользователя"""
@@ -196,7 +184,6 @@ def mute_user(update: Update, context: CallbackContext):
         username = context.args[0].lstrip('@')
         mute_duration = int(context.args[1])
 
-        # Определяем, когда снять мьют
         unmute_time = datetime.now() + timedelta(minutes=mute_duration)
         muted_users[username] = unmute_time
 
@@ -215,7 +202,6 @@ def main():
     # Обработчик текстовых сообщений
     dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), handle_message))
 
-    # Запуск бота
     updater.start_polling()
     updater.idle()
 
