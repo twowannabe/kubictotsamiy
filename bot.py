@@ -5,6 +5,7 @@ from telegram import Update
 from datetime import datetime, timedelta
 import openai
 import psycopg2
+import re
 
 # Настройка логирования
 logging.basicConfig(
@@ -42,6 +43,46 @@ except Exception as e:
 
 # Список замьюченных пользователей
 muted_users = {}
+
+
+def search_messages_by_keywords(keywords, limit=50):
+    """Поиск сообщений в базе данных, содержащих одно из ключевых слов и отправленных фиксированным пользователем."""
+    try:
+        with conn.cursor() as cur:
+            # Формируем условие для поиска по нескольким ключевым словам
+            search_conditions = " OR ".join([f"text ILIKE %s" for _ in keywords])
+            query = f"""
+                SELECT text
+                FROM messages
+                WHERE ({search_conditions}) AND user_id = %s
+                ORDER BY date ASC
+                LIMIT %s
+            """
+            search_patterns = [f"%{keyword}%" for keyword in keywords]
+            logger.info(f"Поиск сообщений с ключевыми словами: {keywords}")  # Логирование ключевых слов поиска
+            cur.execute(query, (*search_patterns, FIXED_USER_ID, limit))
+            messages = cur.fetchall()
+
+            # Логируем все найденные сообщения
+            if messages:
+                logger.info(f"Найденные сообщения по ключевым словам '{keywords}': {messages}")
+            else:
+                logger.info(f"Сообщения по ключевым словам '{keywords}' не найдены.")
+
+            return [msg[0] for msg in messages if msg[0]]
+    except Exception as e:
+        logger.error(f"Ошибка при поиске сообщений по ключевым словам: {e}")
+        return []
+
+def extract_keywords_from_question(question):
+    """Извлекает ключевые слова из вопроса"""
+    # Убираем стоп-слова и лишние символы
+    stop_words = {"что", "как", "про", "думаешь", "о", "и", "в", "на", "по", "ты", "это"}
+    words = re.findall(r'\b\w+\b', question.lower())
+    keywords = [word for word in words if word not in stop_words]
+
+    # Возвращаем список ключевых слов
+    return keywords if keywords else question.split()
 
 def check_and_remove_mute():
     """Проверяет время и снимает мьют с пользователей"""
@@ -165,11 +206,14 @@ def handle_message(update: Update, context: CallbackContext):
     if not message_deleted and should_respond_to_message(update, context):
         user_question = update.message.text.strip()
 
-        # Используем OpenAI для извлечения темы вопроса
-        topic = extract_topic_from_question(user_question)
+        # Извлекаем ключевые слова из вопроса
+        keywords = extract_keywords_from_question(user_question)
 
-        if topic:
-            related_messages = search_messages_by_topic(topic)
+        if keywords:
+            # Логируем ключевые слова, по которым будем искать сообщения
+            logger.info(f"Начинаем поиск сообщений по ключевым словам: {keywords}")
+
+            related_messages = search_messages_by_keywords(keywords)
 
             if related_messages:
                 # Генерируем ответ с помощью OpenAI
