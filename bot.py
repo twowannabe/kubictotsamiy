@@ -43,56 +43,32 @@ except Exception as e:
     logger.error(f"Ошибка подключения к базе данных: {e}")
     exit(1)
 
-# Список замьюченных пользователей
+# Списки замьюченных и забаненных пользователей
 muted_users = {}
+banned_users = {}
 
-
-def search_messages_by_keywords(keywords, limit=1000):
-    """Поиск сообщений в базе данных, содержащих одно из ключевых слов и отправленных фиксированным пользователем."""
-    try:
-        with conn.cursor() as cur:
-            # Формируем условие для поиска по нескольким ключевым словам
-            search_conditions = " OR ".join([f"text ILIKE %s" for _ in keywords])
-            query = f"""
-                SELECT text
-                FROM messages
-                WHERE ({search_conditions}) AND user_id = %s
-                ORDER BY date ASC
-                LIMIT %s
-            """
-            search_patterns = [f"%{keyword}%" for keyword in keywords]
-            logger.info(f"Поиск сообщений с ключевыми словами: {keywords}")  # Логирование ключевых слов поиска
-            cur.execute(query, (*search_patterns, FIXED_USER_ID, limit))
-            messages = cur.fetchall()
-
-            # Логируем все найденные сообщения
-            if messages:
-                logger.info(f"Найденные сообщения по ключевым словам '{keywords}': {messages}")
-            else:
-                logger.info(f"Сообщения по ключевым словам '{keywords}' не найдены.")
-
-            return [msg[0] for msg in messages if msg[0]]
-    except Exception as e:
-        logger.error(f"Ошибка при поиске сообщений по ключевым словам: {e}")
-        return []
-
-def extract_keywords_from_question(question):
-    """Извлекает ключевые слова из вопроса"""
-    # Убираем стоп-слова и лишние символы
-    stop_words = {"что", "как", "про", "думаешь", "о", "и", "в", "на", "по", "ты", "это"}
-    words = re.findall(r'\b\w+\b', question.lower())
-    keywords = [word for word in words if word not in stop_words]
-
-    # Возвращаем список ключевых слов
-    return keywords if keywords else question.split()
-
-def check_and_remove_mute():
-    """Проверяет время и снимает мьют с пользователей"""
+def check_and_remove_ban():
+    """Проверяет время и снимает бан с пользователей"""
     now = datetime.now()
-    to_remove = [user for user, unmute_time in muted_users.items() if now >= unmute_time]
+    to_remove = [user for user, unban_time in banned_users.items() if now >= unban_time]
 
+    # Удаление пользователей, чей бан истек
     for user in to_remove:
-        del muted_users[user]
+        del banned_users[user]
+
+def delete_banned_user_message(update: Update, context: CallbackContext) -> bool:
+    """Удаляет сообщения забаненных пользователей и возвращает True, если сообщение было удалено"""
+    check_and_remove_ban()
+
+    if update.message.from_user.id in banned_users:
+        try:
+            context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
+            logger.info(f"Сообщение от пользователя с ID {update.message.from_user.id} было удалено, так как он забанен.")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при удалении сообщения забаненного пользователя: {e}")
+            return False
+    return False
 
 def delete_muted_user_message(update: Update, context: CallbackContext) -> bool:
     """Удаляет сообщения замьюченных пользователей и возвращает True, если сообщение было удалено"""
@@ -110,76 +86,24 @@ def delete_muted_user_message(update: Update, context: CallbackContext) -> bool:
             return False
     return False
 
-def should_respond_to_message(update: Update, context: CallbackContext) -> bool:
-    """Проверяет, нужно ли отвечать на сообщение"""
-    message = update.message
+def check_and_remove_mute():
+    """Проверяет время и снимает мьют с пользователей"""
+    now = datetime.now()
+    to_remove = [user for user, unmute_time in muted_users.items() if now >= unmute_time]
 
-    # Проверяем, упомянули ли бота
-    if message.entities:
-        for entity in message.entities:
-            mention = message.text[entity.offset:entity.offset + entity.length].lower()
-            if entity.type == 'mention' and mention == f"@{context.bot.username.lower()}":
-                return True
+    for user in to_remove:
+        del muted_users[user]
 
-    # Проверяем, является ли сообщение ответом на сообщение бота
-    if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
-        return True
+def truncate_to_ten_words(text):
+    """Ограничивает текст до 10 слов"""
+    words = text.split()
+    if len(words) > 10:
+        return " ".join(words[:10]) + "..."
+    return text
 
-    return False
-
-def extract_topic_from_question(question):
-    """Использует OpenAI для анализа вопроса и извлечения основной темы с помощью чат-модели"""
-    prompt = f"Определи ключевую тему вопроса: '{question}' и верни только ключевую тему одним словом."
-
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Ты помощник, который извлекает ключевую тему вопроса."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=5,
-            n=1,
-            stop=None,
-            temperature=0.5
-        )
-        topic = response['choices'][0]['message']['content'].strip()
-        logger.info(f"Извлеченная тема: {topic}")  # Логирование ключевой темы
-        return topic
-    except Exception as e:
-        logger.error(f"Ошибка при анализе темы вопроса с помощью OpenAI: {e}")
-        return None
-
-def search_messages_by_topic(topic, limit=50):
-    """Поиск сообщений в базе данных, содержащих ключевые слова из вопроса и отправленных фиксированным пользователем."""
-    try:
-        with conn.cursor() as cur:
-            query = """
-                SELECT text
-                FROM messages
-                WHERE text ILIKE %s AND user_id = %s
-                ORDER BY date ASC
-                LIMIT %s
-            """
-            search_pattern = f"%{topic}%"
-            logger.info(f"Поиск сообщений с темой: {topic}")  # Логирование ключевого слова поиска
-            cur.execute(query, (search_pattern, FIXED_USER_ID, limit))
-            messages = cur.fetchall()
-            return [msg[0] for msg in messages if msg[0]]
-    except Exception as e:
-        logger.error(f"Ошибка при поиске сообщений по теме: {e}")
-        return []
-
-def truncate_messages(messages, max_chars=500):
-    """Усечение сообщений до максимального количества символов"""
-    combined_messages = " ".join(messages)
-    if len(combined_messages) > max_chars:
-        return combined_messages[:max_chars] + "..."
-    return combined_messages
-
-def generate_answer_by_topic(user_question, related_messages, max_chars=500):
+def generate_answer_by_topic(user_question, related_messages):
     """Генерация ответа на основе сообщений, содержащих ключевые слова из вопроса."""
-    truncated_messages = truncate_messages(related_messages, max_chars)
+    truncated_messages = " ".join(related_messages)
 
     prompt = f"На основе приведенных ниже сообщений пользователя, сформулируй связное мнение от его имени. \n\nСообщения пользователя:\n{truncated_messages}\n\nВопрос пользователя: {user_question}\nОтвет:"
 
@@ -190,20 +114,27 @@ def generate_answer_by_topic(user_question, related_messages, max_chars=500):
                 {"role": "system", "content": "Ты помощник, который отвечает от имени пользователя на основании его сообщений."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=100,  # Уменьшаем длину ответа
+            max_tokens=100,  # Ограничение по количеству токенов
             n=1,
             stop=None,
             temperature=0.7,
         )
         answer = response['choices'][0]['message']['content'].strip()
-        return answer
+
+        # Ограничиваем текст до 10 слов
+        return truncate_to_ten_words(answer)
     except Exception as e:
         logger.error(f"Ошибка при запросе к OpenAI API: {e}")
         return ""
 
 def handle_message(update: Update, context: CallbackContext):
     """Обработка текстовых сообщений"""
-    message_deleted = delete_muted_user_message(update, context)
+    # Проверяем, если сообщение от забаненного пользователя
+    message_deleted = delete_banned_user_message(update, context)
+
+    # Если сообщение не было удалено как забаненное, проверяем мьют
+    if not message_deleted:
+        message_deleted = delete_muted_user_message(update, context)
 
     if not message_deleted and should_respond_to_message(update, context):
         user_question = update.message.text.strip()
@@ -252,16 +183,90 @@ def mute_user(update: Update, context: CallbackContext):
         logger.error(f"Ошибка в mute_user: {e}")
         update.message.reply_text("Произошла ошибка при выполнении команды.")
 
+def ban_user(update: Update, context: CallbackContext):
+    """Команда для бана пользователя"""
+    try:
+        user_id = update.message.from_user.id
+
+        # Проверяем, находится ли пользователь в списке авторизованных
+        if user_id not in AUTHORIZED_USERS:
+            logger.info(f"Пользователь {user_id} попытался использовать команду /ban, но не имеет прав.")
+            update.message.reply_text("У вас нет прав на использование этой команды.")
+            return
+
+        # Проверяем, является ли команда ответом на сообщение
+        if not update.message.reply_to_message:
+            update.message.reply_text("Команда /ban должна быть ответом на сообщение пользователя.")
+            return
+
+        # Получаем user_id пользователя, которого банят
+        target_user_id = update.message.reply_to_message.from_user.id
+
+        # Определяем, когда снять бан (через 10 минут)
+        ban_end_time = datetime.now() + timedelta(minutes=10)
+        banned_users[target_user_id] = ban_end_time
+
+        update.message.reply_text(f"Пользователь с ID {target_user_id} забанен на 10 минут.")
+    except Exception as e:
+        logger.error(f"Ошибка в ban_user: {e}")
+        update.message.reply_text("Произошла ошибка при выполнении команды.")
+
+def unban_user(update: Update, context: CallbackContext):
+    """Команда для разблокировки пользователя, удаляет его из списков banned_users и muted_users"""
+    try:
+        user_id = update.message.from_user.id
+
+        # Проверяем, находится ли пользователь в списке авторизованных
+        if user_id not in AUTHORIZED_USERS:
+            logger.info(f"Пользователь {user_id} попытался использовать команду /unban, но не имеет прав.")
+            update.message.reply_text("У вас нет прав на использование этой команды.")
+            return
+
+        if not context.args or len(context.args) < 1:
+            update.message.reply_text("Использование: /unban @username")
+            return
+
+        # Получаем username пользователя, которого нужно разблокировать
+        username = context.args[0].lstrip('@')
+
+        # Ищем пользователя в списке замьюченных и забаненных
+        if username in muted_users:
+            del muted_users[username]
+            logger.info(f"Пользователь {username} был разблокирован из списка muted_users.")
+        else:
+            logger.info(f"Пользователь {username} не найден в списке muted_users.")
+
+        # Найдем пользователя по user_id среди banned_users
+        found_user_id = None
+        for uid, _ in banned_users.items():
+            if update.message.chat.get_member(uid).user.username == username:
+                found_user_id = uid
+                break
+
+        if found_user_id:
+            del banned_users[found_user_id]
+            logger.info(f"Пользователь {username} был разблокирован из списка banned_users.")
+        else:
+            logger.info(f"Пользователь {username} не найден в списке banned_users.")
+
+        update.message.reply_text(f"Пользователь {username} был разблокирован.")
+    except Exception as e:
+        logger.error(f"Ошибка в unban_user: {e}")
+        update.message.reply_text("Произошла ошибка при выполнении команды.")
+
 def main():
     updater = Updater(token=TELEGRAM_API_TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
     # Обработчик команд
     dispatcher.add_handler(CommandHandler('mute', mute_user))
+    dispatcher.add_handler(CommandHandler('ban', ban_user))
+    dispatcher.add_handler(CommandHandler('unban', unban_user))
 
     # Обработчик текстовых сообщений
     dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), handle_message))
 
+    # Запуск бота
     updater.start_polling()
     updater.idle()
 
