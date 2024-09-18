@@ -27,7 +27,7 @@ DB_PORT = config('DB_PORT')
 # Фиксированный идентификатор пользователя
 FIXED_USER_ID = int(config('FIXED_USER_ID'))
 
-AUTHORIZED_USERS = [530674302, 6122780749, 147218177, 336914967]
+AUTHORIZED_USERS = [530674302, 6122780749, 147218177, 336914967, 130043299]
 
 # Подключение к базе данных PostgreSQL
 try:
