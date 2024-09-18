@@ -60,30 +60,34 @@ def delete_banned_user_message(update: Update, context: CallbackContext) -> bool
     """Удаляет сообщения забаненных пользователей и возвращает True, если сообщение было удалено"""
     check_and_remove_ban()
 
-    if update.message.from_user.id in banned_users:
-        try:
-            context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
-            logger.info(f"Сообщение от пользователя с ID {update.message.from_user.id} было удалено, так как он забанен.")
-            return True
-        except Exception as e:
-            logger.error(f"Ошибка при удалении сообщения забаненного пользователя: {e}")
-            return False
+    # Проверяем, есть ли сообщение в обновлении
+    if update.message and update.message.from_user:
+        if update.message.from_user.id in banned_users:
+            try:
+                context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
+                logger.info(f"Сообщение от пользователя с ID {update.message.from_user.id} было удалено, так как он забанен.")
+                return True
+            except Exception as e:
+                logger.error(f"Ошибка при удалении сообщения забаненного пользователя: {e}")
+                return False
     return False
 
 def delete_muted_user_message(update: Update, context: CallbackContext) -> bool:
     """Удаляет сообщения замьюченных пользователей и возвращает True, если сообщение было удалено"""
     check_and_remove_mute()
 
-    username = update.message.from_user.username
+    # Проверяем, есть ли сообщение в обновлении
+    if update.message and update.message.from_user:
+        username = update.message.from_user.username
 
-    if username in muted_users:
-        try:
-            context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
-            logger.info(f"Сообщение от {username} было удалено, так как он замьючен.")
-            return True
-        except Exception as e:
-            logger.error(f"Ошибка при удалении сообщения от {username}: {e}")
-            return False
+        if username in muted_users:
+            try:
+                context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
+                logger.info(f"Сообщение от {username} было удалено, так как он замьючен.")
+                return True
+            except Exception as e:
+                logger.error(f"Ошибка при удалении сообщения от {username}: {e}")
+                return False
     return False
 
 def check_and_remove_mute():
@@ -146,6 +150,10 @@ def should_respond_to_message(update: Update, context: CallbackContext) -> bool:
 
 def handle_message(update: Update, context: CallbackContext):
     """Обработка текстовых сообщений"""
+    # Проверяем, если сообщение существует
+    if not update.message:
+        return
+
     # Проверяем, если сообщение от забаненного пользователя
     message_deleted = delete_banned_user_message(update, context)
 
