@@ -127,6 +127,23 @@ def generate_answer_by_topic(user_question, related_messages):
         logger.error(f"Ошибка при запросе к OpenAI API: {e}")
         return ""
 
+def should_respond_to_message(update: Update, context: CallbackContext) -> bool:
+    """Проверяет, нужно ли отвечать на сообщение (если упомянули бота или это ответ на его сообщение)."""
+    message = update.message
+
+    # Проверяем, упомянули ли бота
+    if message.entities:
+        for entity in message.entities:
+            mention = message.text[entity.offset:entity.offset + entity.length].lower()
+            if entity.type == 'mention' and mention == f"@{context.bot.username.lower()}":
+                return True
+
+    # Проверяем, является ли сообщение ответом на сообщение бота
+    if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
+        return True
+
+    return False
+
 def handle_message(update: Update, context: CallbackContext):
     """Обработка текстовых сообщений"""
     # Проверяем, если сообщение от забаненного пользователя
