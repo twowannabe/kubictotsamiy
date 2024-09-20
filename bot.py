@@ -115,7 +115,8 @@ def search_messages_by_keywords(keywords):
     """Поиск сообщений по ключевым словам в базе данных."""
     try:
         cur = conn.cursor()
-        query = f"SELECT message FROM messages WHERE " + " OR ".join([f"message ILIKE %s" for _ in keywords])
+        # Формируем SQL запрос для поиска сообщений в поле text
+        query = f"SELECT text FROM messages WHERE " + " OR ".join([f"text ILIKE %s" for _ in keywords])
         cur.execute(query, [f"%{keyword}%" for keyword in keywords])
         messages = [row[0] for row in cur.fetchall()]
         cur.close()
