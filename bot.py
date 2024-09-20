@@ -143,7 +143,7 @@ def generate_answer_by_topic(user_question, related_messages):
         logger.info(f"Запрос в OpenAI: {prompt}")
 
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",  # Используйте выбранную вами модель
+            model="o1-mini",  # Используйте выбранную вами модель
             messages=[
                 {"role": "system", "content": "Ты помощник, который отвечает от имени пользователя на основании его сообщений."},
                 {"role": "user", "content": prompt}
