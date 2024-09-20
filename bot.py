@@ -47,6 +47,38 @@ except Exception as e:
 muted_users = {}
 banned_users = {}
 
+def handle_edited_message(update: Update, context: CallbackContext):
+    """Обработка отредактированных сообщений и удаление их, если пользователь замьючен."""
+
+    # Проверяем, если отредактированное сообщение существует
+    if not update.edited_message:
+        logger.error("Отредактированное сообщение не найдено в обновлении.")
+        return
+
+    user_id = update.edited_message.from_user.id
+    username = update.edited_message.from_user.username
+
+    logger.info(f"Пользователь {username} (ID: {user_id}) отредактировал сообщение: {update.edited_message.text}")
+
+    # Проверяем и снимаем истекшие мьюты
+    check_and_remove_mute()
+
+    # Удаляем отредактированные сообщения от замьюченных пользователей
+    if user_id in muted_users:
+        logger.info(f"Пользователь {username} (ID: {user_id}) замьючен. Удаление отредактированного сообщения.")
+        try:
+            context.bot.delete_message(chat_id=update.edited_message.chat_id, message_id=update.edited_message.message_id)
+            logger.info(f"Отредактированное сообщение от замьюченного пользователя {username} (ID: {user_id}) было удалено.")
+            return
+        except Exception as e:
+            logger.error(f"Ошибка при удалении отредактированного сообщения от замьюченного пользователя {username} (ID: {user_id}): {e}")
+            return
+    else:
+        logger.info(f"Пользователь {username} (ID: {user_id}) не замьючен.")
+
+    # Если необходимо, добавьте дополнительную обработку отредактированных сообщений здесь
+    # Например, проверка на команды или другие условия
+
 def check_and_remove_ban():
     """Проверяет время и снимает бан с пользователей"""
     now = datetime.now()
@@ -207,6 +239,9 @@ def handle_message(update: Update, context: CallbackContext):
 
     logger.info(f"Получено сообщение от пользователя {username} (ID: {user_id}): {update.message.text}")
 
+    # Проверяем и снимаем истекшие мьюты
+    check_and_remove_mute()
+
     # Удаляем сообщения от замьюченных пользователей
     if user_id in muted_users:
         logger.info(f"Пользователь {username} (ID: {user_id}) замьючен. Удаление сообщения.")
@@ -356,13 +391,14 @@ def main():
     updater = Updater(token=TELEGRAM_API_TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
-    # Обработчик команд
+    # Обработчики команд
     dispatcher.add_handler(CommandHandler('mute', mute_user))
     dispatcher.add_handler(CommandHandler('ban', ban_user))
     dispatcher.add_handler(CommandHandler('unban', unban_user))
 
-    # Обработчик текстовых сообщений
-    dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), handle_message))
+    # Обработчики сообщений
+    dispatcher.add_handler(MessageHandler(Filters.all, handle_message))
+    dispatcher.add_handler(MessageHandler(Filters.update.edited_message, handle_edited_message))
 
     # Запуск бота
     updater.start_polling()
