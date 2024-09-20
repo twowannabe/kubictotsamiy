@@ -101,8 +101,8 @@ def check_and_remove_mute():
 def truncate_to_ten_words(text):
     """Ограничивает текст до 10 слов"""
     words = text.split()
-    if len(words) > 10:
-        return " ".join(words[:10]) + "..."
+    if len(words) > 20:
+        return " ".join(words[:20]) + "..."
     return text
 
 def extract_keywords_from_question(question):
@@ -143,22 +143,25 @@ def generate_answer_by_topic(user_question, related_messages):
         logger.info(f"Запрос в OpenAI: {prompt}")
 
         response = openai.ChatCompletion.create(
-            model="o1-mini",  # Используйте выбранную вами модель
+            model="gpt-4o-mini",  # Используйте выбранную модель
             messages=[
                 {"role": "system", "content": "Ты помощник, который отвечает от имени пользователя на основании его сообщений."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=500,  # Увеличьте количество токенов для более длинного ответа
+            max_tokens=250,  # Оставляем достаточно токенов для ответа
             n=1,
             stop=None,
             temperature=0.7,
         )
         answer = response['choices'][0]['message']['content'].strip()
 
-        # Логируем полученный ответ от OpenAI
-        logger.info(f"Ответ OpenAI: {answer}")
+        # Ограничиваем текст до 10 слов
+        short_answer = truncate_to_ten_words(answer)
 
-        return answer  # Возвращаем полный ответ
+        # Логируем полученный ответ от OpenAI
+        logger.info(f"Ответ OpenAI: {short_answer}")
+
+        return short_answer  # Возвращаем ограниченный ответ
     except Exception as e:
         logger.error(f"Ошибка при запросе к OpenAI API: {e}")
         return ""
