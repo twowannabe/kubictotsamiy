@@ -81,6 +81,16 @@ def delete_muted_user_message(update: Update, context: CallbackContext) -> bool:
         username = update.message.from_user.username
 
         if username in muted_users:
+            # Если сообщение начинается с команды (слэш)
+            if update.message.text.startswith("/"):
+                try:
+                    context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
+                    logger.info(f"Сообщение команды от {username} было удалено, так как он замьючен.")
+                    return True
+                except Exception as e:
+                    logger.error(f"Ошибка при удалении команды от {username}: {e}")
+                    return False
+
             try:
                 context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
                 logger.info(f"Сообщение от {username} было удалено, так как он замьючен.")
@@ -89,6 +99,7 @@ def delete_muted_user_message(update: Update, context: CallbackContext) -> bool:
                 logger.error(f"Ошибка при удалении сообщения от {username}: {e}")
                 return False
     return False
+
 
 def check_and_remove_mute():
     """Проверяет время и снимает мьют с пользователей"""
