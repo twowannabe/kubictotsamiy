@@ -7,14 +7,14 @@ import openai
 import psycopg2
 import re
 
-# Настройка логирования
+# Logging configuration
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Загрузка переменных из .env файла
+# Load variables from .env file
 TELEGRAM_API_TOKEN = config('TELEGRAM_API_TOKEN')
 openai.api_key = config('OPENAI_API_KEY')
 
@@ -24,12 +24,12 @@ DB_PASSWORD = config('DB_PASSWORD')
 DB_HOST = config('DB_HOST')
 DB_PORT = config('DB_PORT')
 
-# Фиксированный идентификатор пользователя
+# Fixed user ID
 FIXED_USER_ID = int(config('FIXED_USER_ID'))
 
 AUTHORIZED_USERS = [530674302, 6122780749, 147218177, 336914967, 130043299, 111733381]
 
-# Подключение к базе данных PostgreSQL
+# Connect to PostgreSQL database
 try:
     conn = psycopg2.connect(
         dbname=DB_NAME,
@@ -38,249 +38,202 @@ try:
         host=DB_HOST,
         port=DB_PORT
     )
-    logger.info("Успешно подключились к базе данных PostgreSQL")
+    logger.info("Successfully connected to PostgreSQL database")
 except Exception as e:
-    logger.error(f"Ошибка подключения к базе данных: {e}")
+    logger.error(f"Database connection error: {e}")
     exit(1)
 
-# Списки замьюченных и забаненных пользователей
+# Lists of muted and banned users
 muted_users = {}
 banned_users = {}
 
-def handle_edited_message(update: Update, context: CallbackContext):
-    """Обработка отредактированных сообщений и удаление их, если пользователь замьючен."""
-
-    # Проверяем, если отредактированное сообщение существует
-    if not update.edited_message:
-        logger.error("Отредактированное сообщение не найдено в обновлении.")
-        return
-
-    user_id = update.edited_message.from_user.id
-    username = update.edited_message.from_user.username
-
-    logger.info(f"Пользователь {username} (ID: {user_id}) отредактировал сообщение: {update.edited_message.text}")
-
-    # Проверяем и снимаем истекшие мьюты
-    check_and_remove_mute()
-
-    # Удаляем отредактированные сообщения от замьюченных пользователей
-    if user_id in muted_users:
-        logger.info(f"Пользователь {username} (ID: {user_id}) замьючен. Удаление отредактированного сообщения.")
-        try:
-            context.bot.delete_message(chat_id=update.edited_message.chat_id, message_id=update.edited_message.message_id)
-            logger.info(f"Отредактированное сообщение от замьюченного пользователя {username} (ID: {user_id}) было удалено.")
-            return
-        except Exception as e:
-            logger.error(f"Ошибка при удалении отредактированного сообщения от замьюченного пользователя {username} (ID: {user_id}): {e}")
-            return
-    else:
-        logger.info(f"Пользователь {username} (ID: {user_id}) не замьючен.")
-
-    # Если необходимо, добавьте дополнительную обработку отредактированных сообщений здесь
-    # Например, проверка на команды или другие условия
-
 def check_and_remove_ban():
-    """Проверяет время и снимает бан с пользователей"""
+    """Checks the time and unbans users if the ban duration has expired"""
     now = datetime.now()
     to_remove = [user for user, unban_time in banned_users.items() if now >= unban_time]
 
-    # Удаление пользователей, чей бан истек
     for user in to_remove:
         del banned_users[user]
+        logger.info(f"Ban for user ID {user} has expired and was removed.")
+
+def check_and_remove_mute():
+    """Checks the time and unmutes users if the mute duration has expired"""
+    now = datetime.now()
+    to_remove = [user_id for user_id, unmute_time in muted_users.items() if now >= unmute_time]
+
+    for user_id in to_remove:
+        del muted_users[user_id]
+        logger.info(f"Mute for user ID {user_id} has expired and was removed.")
 
 def delete_banned_user_message(update: Update, context: CallbackContext) -> bool:
-    """Удаляет сообщения забаненных пользователей и возвращает True, если сообщение было удалено"""
+    """Deletes messages from banned users and returns True if the message was deleted"""
     check_and_remove_ban()
 
-    # Проверяем, есть ли сообщение в обновлении
     if update.message and update.message.from_user:
         if update.message.from_user.id in banned_users:
             try:
                 context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
-                logger.info(f"Сообщение от пользователя с ID {update.message.from_user.id} было удалено, так как он забанен.")
+                logger.info(f"Message from user ID {update.message.from_user.id} was deleted because they are banned.")
                 return True
             except Exception as e:
-                logger.error(f"Ошибка при удалении сообщения забаненного пользователя: {e}")
+                logger.error(f"Error deleting message from banned user: {e}")
                 return False
     return False
-
-def delete_muted_user_message(update: Update, context: CallbackContext) -> bool:
-    """Удаляет сообщения замьюченных пользователей и возвращает True, если сообщение было удалено"""
-    check_and_remove_mute()
-
-    # Проверяем, есть ли сообщение в обновлении
-    if update.message and update.message.from_user:
-        username = update.message.from_user.username
-
-        if username in muted_users:
-            # Если сообщение начинается с команды (слэш)
-            if update.message.text.startswith("/"):
-                try:
-                    context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
-                    logger.info(f"Сообщение команды от {username} было удалено, так как он замьючен.")
-                    return True
-                except Exception as e:
-                    logger.error(f"Ошибка при удалении команды от {username}: {e}")
-                    return False
-
-            try:
-                context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
-                logger.info(f"Сообщение от {username} было удалено, так как он замьючен.")
-                return True
-            except Exception as e:
-                logger.error(f"Ошибка при удалении сообщения от {username}: {e}")
-                return False
-    return False
-
-
-def check_and_remove_mute():
-    """Проверяет время и снимает мьют с пользователей"""
-    now = datetime.now()
-    to_remove = [user for user, unmute_time in muted_users.items() if now >= unmute_time]
-
-    for user in to_remove:
-        del muted_users[user]
-
-def truncate_to_ten_words(text):
-    """Ограничивает текст до 10 слов"""
-    words = text.split()
-    if len(words) > 20:
-        return " ".join(words[:20]) + "..."
-    return text
 
 def extract_keywords_from_question(question):
-    """Извлекает ключевые слова из вопроса пользователя."""
+    """Extracts keywords from the user's question."""
     clean_question = re.sub(r'[^\w\s]', '', question).lower()
     keywords = clean_question.split()
     return keywords
 
 def search_messages_by_keywords(keywords, limit=50):
-    """Поиск сообщений по ключевым словам в базе данных для FIXED_USER_ID, с ограничением на количество."""
+    """Searches for messages containing keywords in the database for FIXED_USER_ID, with a limit on the number."""
     try:
         cur = conn.cursor()
-        # Формируем SQL запрос для поиска сообщений с фильтрацией по user_id и ограничением по количеству (LIMIT)
         query = f"SELECT text FROM messages WHERE user_id = %s AND (" + " OR ".join([f"text ILIKE %s" for _ in keywords]) + f") LIMIT {limit}"
         cur.execute(query, [FIXED_USER_ID] + [f"%{keyword}%" for keyword in keywords])
         messages = [row[0] for row in cur.fetchall()]
         cur.close()
 
-        # Логируем найденные сообщения
-        logger.info(f"Найденные сообщения для FIXED_USER_ID: {messages}")
+        logger.info(f"Found messages for FIXED_USER_ID: {messages}")
 
         return messages
     except Exception as e:
-        logger.error(f"Ошибка при поиске сообщений в базе данных: {e}")
+        logger.error(f"Error searching messages in the database: {e}")
         return []
 
 def generate_answer_by_topic(user_question, related_messages):
-    """Генерация ответа на основе сообщений, содержащих ключевые слова из вопроса."""
+    """Generates an answer based on messages containing keywords from the question."""
     truncated_messages = " ".join(related_messages)
 
-    # Логируем найденные сообщения
-    logger.info(f"Найденные сообщения для генерации ответа: {truncated_messages}")
+    logger.info(f"Found messages for answer generation: {truncated_messages}")
 
-    prompt = f"На основе приведенных ниже сообщений пользователя, сформулируй связное мнение от его имени. \n\nСообщения пользователя:\n{truncated_messages}\n\nВопрос пользователя: {user_question}\nОтвет:"
+    prompt = f"Based on the user's messages below, formulate a coherent opinion on their behalf.\n\nUser messages:\n{truncated_messages}\n\nUser question: {user_question}\nAnswer:"
 
     try:
-        # Логируем отправляемый запрос
-        logger.info(f"Запрос в OpenAI: {prompt}")
+        logger.info(f"OpenAI prompt: {prompt}")
 
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",  # Используйте выбранную модель
+            model="gpt-4o-mini",  # Use the selected model
             messages=[
-                {"role": "system", "content": "Ты помощник, который отвечает от имени пользователя на основании его сообщений."},
+                {"role": "system", "content": "You are an assistant who answers on behalf of the user based on their messages."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=250,  # Оставляем достаточно токенов для ответа
+            max_tokens=250,
             n=1,
             stop=None,
             temperature=0.7,
         )
         answer = response['choices'][0]['message']['content'].strip()
 
-        # Ограничиваем текст до 10 слов
-        short_answer = truncate_to_ten_words(answer)
+        # Truncate the text to 20 words
+        words = answer.split()
+        if len(words) > 20:
+            short_answer = " ".join(words[:20]) + "..."
+        else:
+            short_answer = answer
 
-        # Логируем полученный ответ от OpenAI
-        logger.info(f"Ответ OpenAI: {short_answer}")
+        logger.info(f"OpenAI answer: {short_answer}")
 
-        return short_answer  # Возвращаем ограниченный ответ
+        return short_answer
     except Exception as e:
-        logger.error(f"Ошибка при запросе к OpenAI API: {e}")
+        logger.error(f"Error querying OpenAI API: {e}")
         return ""
 
 def should_respond_to_message(update: Update, context: CallbackContext) -> bool:
-    """Проверяет, нужно ли отвечать на сообщение (если упомянули бота или это ответ на его сообщение)."""
+    """Checks if the bot should respond to the message (if the bot was mentioned or it's a reply to its message)."""
     message = update.message
 
-    # Проверяем, упомянули ли бота
     if message.entities:
         for entity in message.entities:
             mention = message.text[entity.offset:entity.offset + entity.length].lower()
             if entity.type == 'mention' and mention == f"@{context.bot.username.lower()}":
                 return True
 
-    # Проверяем, является ли сообщение ответом на сообщение бота
     if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
         return True
 
     return False
 
 def handle_message(update: Update, context: CallbackContext):
-    """Обработка входящих сообщений и удаление их, если пользователь замьючен."""
-
-    # Проверяем, если сообщение существует
+    """Handles incoming messages and deletes them if the user is muted."""
     if not update.message:
-        logger.error("Сообщение не найдено в обновлении.")
+        logger.error("Message not found in update.")
         return
 
     user_id = update.message.from_user.id
     username = update.message.from_user.username
 
-    logger.info(f"Получено сообщение от пользователя {username} (ID: {user_id}): {update.message.text}")
+    logger.info(f"Received message from user {username} (ID: {user_id}): {update.message.text}")
 
-    # Проверяем и снимаем истекшие мьюты
+    # Check and remove expired mutes
     check_and_remove_mute()
 
-    # Удаляем сообщения от замьюченных пользователей
+    # Delete messages from muted users
     if user_id in muted_users:
-        logger.info(f"Пользователь {username} (ID: {user_id}) замьючен. Удаление сообщения.")
+        logger.info(f"User {username} (ID: {user_id}) is muted. Deleting message.")
         try:
             context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
-            logger.info(f"Сообщение от замьюченного пользователя {username} (ID: {user_id}) было удалено.")
+            logger.info(f"Message from muted user {username} (ID: {user_id}) was deleted.")
             return
         except Exception as e:
-            logger.error(f"Ошибка при удалении сообщения от замьюченного пользователя {username} (ID: {user_id}): {e}")
+            logger.error(f"Error deleting message from muted user {username} (ID: {user_id}): {e}")
             return
     else:
-        logger.info(f"Пользователь {username} (ID: {user_id}) не замьючен.")
+        logger.info(f"User {username} (ID: {user_id}) is not muted.")
 
-    # Проверяем, если сообщение от забаненного пользователя
+    # Delete messages from banned users
     message_deleted = delete_banned_user_message(update, context)
 
-    # Если сообщение не было удалено как забаненное, проверяем дальнейшую обработку
+    # Continue processing if the message was not deleted
     if not message_deleted and should_respond_to_message(update, context):
         user_question = update.message.text.strip()
 
-        # Извлекаем ключевые слова из вопроса
+        # Extract keywords from the question
         keywords = extract_keywords_from_question(user_question)
 
         if keywords:
-            # Логируем ключевые слова, по которым будем искать сообщения
-            logger.info(f"Начинаем поиск сообщений по ключевым словам: {keywords}")
+            logger.info(f"Starting search for messages with keywords: {keywords}")
 
             related_messages = search_messages_by_keywords(keywords)
 
             if related_messages:
-                # Генерируем ответ с помощью OpenAI
+                # Generate an answer using OpenAI
                 answer = generate_answer_by_topic(user_question, related_messages)
                 if answer:
-                    logger.info(f"Ответ: {answer}")
+                    logger.info(f"Answer: {answer}")
                     update.message.reply_text(answer)
             else:
-                logger.info("Сообщений по ключевым словам не найдено.")
+                logger.info("No messages found for the given keywords.")
         else:
-            logger.info("Ключевые слова не были извлечены.")
+            logger.info("No keywords extracted.")
+
+def handle_edited_message(update: Update, context: CallbackContext):
+    """Handles edited messages and deletes them if the user is muted."""
+    if not update.edited_message:
+        logger.error("Edited message not found in update.")
+        return
+
+    user_id = update.edited_message.from_user.id
+    username = update.edited_message.from_user.username
+
+    logger.info(f"User {username} (ID: {user_id}) edited a message: {update.edited_message.text}")
+
+    # Check and remove expired mutes
+    check_and_remove_mute()
+
+    # Delete edited messages from muted users
+    if user_id in muted_users:
+        logger.info(f"User {username} (ID: {user_id}) is muted. Deleting edited message.")
+        try:
+            context.bot.delete_message(chat_id=update.edited_message.chat_id, message_id=update.edited_message.message_id)
+            logger.info(f"Edited message from muted user {username} (ID: {user_id}) was deleted.")
+            return
+        except Exception as e:
+            logger.error(f"Error deleting edited message from muted user {username} (ID: {user_id}): {e}")
+            return
+    else:
+        logger.info(f"User {username} (ID: {user_id}) is not muted.")
 
 def mute_user(update: Update, context: CallbackContext):
     """Command to mute a user (used as a reply to the user's message)"""
@@ -319,29 +272,29 @@ def mute_user(update: Update, context: CallbackContext):
         update.message.reply_text("Произошла ошибка при выполнении команды.")
 
 def ban_user(update: Update, context: CallbackContext):
-    """Команда для бана пользователя"""
+    """Command to ban a user (used as a reply to the user's message)"""
     try:
         user_id = update.message.from_user.id
 
-        # Проверяем, находится ли пользователь в списке авторизованных
+        # Check if the user is authorized
         if user_id not in AUTHORIZED_USERS:
-            logger.info(f"Пользователь {user_id} попытался использовать команду /ban, но не имеет прав.")
+            logger.info(f"User {user_id} attempted to use /ban command but is not authorized.")
             update.message.reply_text("У вас нет прав на использование этой команды.")
             return
 
-        # Проверяем, является ли команда ответом на сообщение
+        # Check if the command is a reply to a message
         if not update.message.reply_to_message:
             update.message.reply_text("Команда /ban должна быть ответом на сообщение пользователя.")
             return
 
-        # Получаем user_id пользователя, которого банят
+        # Get the target user ID
         target_user_id = update.message.reply_to_message.from_user.id
 
-        # Определяем, когда снять бан (через 10 минут)
+        # Determine when to unban (after 10 minutes)
         ban_end_time = datetime.now() + timedelta(minutes=10)
         banned_users[target_user_id] = ban_end_time
 
-        update.message.reply_text(f"Пользователь с ID {target_user_id} забанен на 10 минут.")
+        update.message.reply_text(f"Пользователь забанен на 10 минут.")
     except Exception as e:
         logger.error(f"Ошибка в ban_user: {e}")
         update.message.reply_text("Произошла ошибка при выполнении команды.")
@@ -383,16 +336,16 @@ def main():
     updater = Updater(token=TELEGRAM_API_TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
-    # Обработчики команд
+    # Command Handlers
     dispatcher.add_handler(CommandHandler('mute', mute_user))
     dispatcher.add_handler(CommandHandler('ban', ban_user))
     dispatcher.add_handler(CommandHandler('unban', unban_user))
 
-    # Обработчики сообщений
+    # Message Handlers
     dispatcher.add_handler(MessageHandler(Filters.all, handle_message))
     dispatcher.add_handler(MessageHandler(Filters.update.edited_message, handle_edited_message))
 
-    # Запуск бота
+    # Start the bot
     updater.start_polling()
     updater.idle()
 
