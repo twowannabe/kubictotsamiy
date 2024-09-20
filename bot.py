@@ -105,6 +105,25 @@ def truncate_to_ten_words(text):
         return " ".join(words[:10]) + "..."
     return text
 
+def extract_keywords_from_question(question):
+    """Извлекает ключевые слова из вопроса пользователя."""
+    clean_question = re.sub(r'[^\w\s]', '', question).lower()
+    keywords = clean_question.split()
+    return keywords
+
+def search_messages_by_keywords(keywords):
+    """Поиск сообщений по ключевым словам в базе данных."""
+    try:
+        cur = conn.cursor()
+        query = f"SELECT message FROM messages WHERE " + " OR ".join([f"message ILIKE %s" for _ in keywords])
+        cur.execute(query, [f"%{keyword}%" for keyword in keywords])
+        messages = [row[0] for row in cur.fetchall()]
+        cur.close()
+        return messages
+    except Exception as e:
+        logger.error(f"Ошибка при поиске сообщений в базе данных: {e}")
+        return []
+
 def generate_answer_by_topic(user_question, related_messages):
     """Генерация ответа на основе сообщений, содержащих ключевые слова из вопроса."""
     truncated_messages = " ".join(related_messages)
@@ -113,7 +132,7 @@ def generate_answer_by_topic(user_question, related_messages):
 
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-4",  # Замените модель на нужную
             messages=[
                 {"role": "system", "content": "Ты помощник, который отвечает от имени пользователя на основании его сообщений."},
                 {"role": "user", "content": prompt}
