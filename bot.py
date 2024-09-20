@@ -199,13 +199,17 @@ def handle_message(update: Update, context: CallbackContext):
 
     # Проверяем, если сообщение существует
     if not update.message:
+        logger.error("Сообщение не найдено в обновлении.")
         return
 
     user_id = update.message.from_user.id  # Используем user_id для идентификации
     username = update.message.from_user.username  # Логируем username для удобства
 
+    logger.info(f"Получено сообщение от пользователя {username} (ID: {user_id}): {update.message.text}")
+
     # Удаляем все сообщения от замьюченных пользователей, независимо от содержания
     if user_id in muted_users:
+        logger.info(f"Пользователь {username} (ID: {user_id}) замьючен. Удаление сообщения.")
         try:
             context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
             logger.info(f"Сообщение от замьюченного пользователя {username} (ID: {user_id}) было удалено.")
@@ -213,6 +217,8 @@ def handle_message(update: Update, context: CallbackContext):
         except Exception as e:
             logger.error(f"Ошибка при удалении сообщения от замьюченного пользователя {username} (ID: {user_id}): {e}")
             return False
+    else:
+        logger.info(f"Пользователь {username} (ID: {user_id}) не замьючен.")
 
     # Проверяем, если сообщение от забаненного пользователя
     message_deleted = delete_banned_user_message(update, context)
