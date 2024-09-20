@@ -133,10 +133,6 @@ def generate_answer_by_topic(user_question, related_messages):
     """Генерация ответа на основе сообщений, содержащих ключевые слова из вопроса."""
     truncated_messages = " ".join(related_messages)
 
-    # Ограничиваем общий объём текста для OpenAI до 2000 символов
-    if len(truncated_messages) > 2000:
-        truncated_messages = truncated_messages[:2000] + '...'
-
     # Логируем найденные сообщения
     logger.info(f"Найденные сообщения для генерации ответа: {truncated_messages}")
 
@@ -147,12 +143,12 @@ def generate_answer_by_topic(user_question, related_messages):
         logger.info(f"Запрос в OpenAI: {prompt}")
 
         response = openai.ChatCompletion.create(
-            model="gpt-4",  # Убедитесь, что используете правильную модель
+            model="gpt-4o-mini",  # Используйте выбранную вами модель
             messages=[
                 {"role": "system", "content": "Ты помощник, который отвечает от имени пользователя на основании его сообщений."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=250,  # Ограничиваем количество токенов
+            max_tokens=500,  # Увеличьте количество токенов для более длинного ответа
             n=1,
             stop=None,
             temperature=0.7,
