@@ -201,22 +201,25 @@ def handle_message(update: Update, context: CallbackContext):
     if not update.message:
         return
 
+    user_id = update.message.from_user.id  # Используем user_id для идентификации
+    username = update.message.from_user.username  # Можно логировать username для удобства
+
+    # Проверка на команды для замьюченных пользователей
+    if update.message.text.startswith("/") and user_id in muted_users:
+        try:
+            context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
+            logger.info(f"Команда от замьюченного пользователя {username} (ID: {user_id}) была удалена.")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при удалении команды от замьюченного пользователя {username} (ID: {user_id}): {e}")
+            return False
+
     # Проверяем, если сообщение от забаненного пользователя
     message_deleted = delete_banned_user_message(update, context)
 
     # Если сообщение не было удалено как забаненное, проверяем мьют
     if not message_deleted:
         message_deleted = delete_muted_user_message(update, context)
-
-    # Проверка на команды для замьюченных пользователей
-    if update.message.text.startswith("/") and update.message.from_user.username in muted_users:
-        try:
-            context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
-            logger.info(f"Команда от замьюченного пользователя {update.message.from_user.username} была удалена.")
-            return True
-        except Exception as e:
-            logger.error(f"Ошибка при удалении команды замьюченного пользователя: {e}")
-            return False
 
     # Если сообщение не было удалено (ни как забаненное, ни как замьюченное), продолжаем обработку
     if not message_deleted and should_respond_to_message(update, context):
