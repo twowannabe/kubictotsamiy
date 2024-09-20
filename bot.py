@@ -196,6 +196,7 @@ def should_respond_to_message(update: Update, context: CallbackContext) -> bool:
 
 def handle_message(update: Update, context: CallbackContext):
     """Обработка текстовых сообщений"""
+
     # Проверяем, если сообщение существует
     if not update.message:
         return
@@ -207,6 +208,17 @@ def handle_message(update: Update, context: CallbackContext):
     if not message_deleted:
         message_deleted = delete_muted_user_message(update, context)
 
+    # Проверка на команды для замьюченных пользователей
+    if update.message.text.startswith("/") and update.message.from_user.username in muted_users:
+        try:
+            context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
+            logger.info(f"Команда от замьюченного пользователя {update.message.from_user.username} была удалена.")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при удалении команды замьюченного пользователя: {e}")
+            return False
+
+    # Если сообщение не было удалено (ни как забаненное, ни как замьюченное), продолжаем обработку
     if not message_deleted and should_respond_to_message(update, context):
         user_question = update.message.text.strip()
 
@@ -225,7 +237,10 @@ def handle_message(update: Update, context: CallbackContext):
                 if answer:
                     logger.info(f"Ответ: {answer}")
                     update.message.reply_text(answer)
-            # Если нет сообщений или ответа, бот просто не отвечает
+            else:
+                logger.info(f"Сообщений по ключевым словам не найдено.")
+        else:
+            logger.info("Ключевые слова не были извлечены.")
 
 def mute_user(update: Update, context: CallbackContext):
     """Команда для мьюта пользователя"""
