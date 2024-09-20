@@ -195,34 +195,29 @@ def should_respond_to_message(update: Update, context: CallbackContext) -> bool:
     return False
 
 def handle_message(update: Update, context: CallbackContext):
-    """Обработка текстовых сообщений"""
+    """Обработка всех сообщений от замьюченных пользователей"""
 
     # Проверяем, если сообщение существует
     if not update.message:
         return
 
     user_id = update.message.from_user.id  # Используем user_id для идентификации
-    username = update.message.from_user.username  # Можно логировать username для удобства
+    username = update.message.from_user.username  # Логируем username для удобства
 
-    # Проверка на команды для замьюченных пользователей
-    # Регулярное выражение находит любые команды, начинающиеся с "/"
-    if re.match(r'^\/\S+', update.message.text) and user_id in muted_users:
+    # Удаляем все сообщения от замьюченных пользователей, независимо от содержания
+    if user_id in muted_users:
         try:
             context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
-            logger.info(f"Команда от замьюченного пользователя {username} (ID: {user_id}) была удалена.")
+            logger.info(f"Сообщение от замьюченного пользователя {username} (ID: {user_id}) было удалено.")
             return True
         except Exception as e:
-            logger.error(f"Ошибка при удалении команды от замьюченного пользователя {username} (ID: {user_id}): {e}")
+            logger.error(f"Ошибка при удалении сообщения от замьюченного пользователя {username} (ID: {user_id}): {e}")
             return False
 
     # Проверяем, если сообщение от забаненного пользователя
     message_deleted = delete_banned_user_message(update, context)
 
-    # Если сообщение не было удалено как забаненное, проверяем мьют
-    if not message_deleted:
-        message_deleted = delete_muted_user_message(update, context)
-
-    # Если сообщение не было удалено (ни как забаненное, ни как замьюченное), продолжаем обработку
+    # Если сообщение не было удалено как забаненное, проверяем дальнейшую обработку
     if not message_deleted and should_respond_to_message(update, context):
         user_question = update.message.text.strip()
 
