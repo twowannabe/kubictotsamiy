@@ -120,6 +120,10 @@ def search_messages_by_keywords(keywords, limit=50):
         cur.execute(query, [f"%{keyword}%" for keyword in keywords])
         messages = [row[0] for row in cur.fetchall()]
         cur.close()
+
+        # Логируем найденные сообщения
+        logger.info(f"Найденные сообщения: {messages}")
+
         return messages
     except Exception as e:
         logger.error(f"Ошибка при поиске сообщений в базе данных: {e}")
