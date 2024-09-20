@@ -205,7 +205,7 @@ def handle_message(update: Update, context: CallbackContext):
     username = update.message.from_user.username  # Можно логировать username для удобства
 
     # Проверка на команды для замьюченных пользователей
-    if update.message.text.startswith("/") and user_id in muted_users:
+    if re.match(r'^\/[a-zA-Z0-9_@]+', update.message.text) and user_id in muted_users:
         try:
             context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
             logger.info(f"Команда от замьюченного пользователя {username} (ID: {user_id}) была удалена.")
