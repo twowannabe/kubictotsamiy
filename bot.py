@@ -248,38 +248,41 @@ def handle_message(update: Update, context: CallbackContext):
             logger.info("Ключевые слова не были извлечены.")
 
 def mute_user(update: Update, context: CallbackContext):
-    """Command to mute a user"""
+    """Команда для мьюта пользователя по username"""
     try:
         user_id = update.message.from_user.id
 
-        # Check if the user is authorized
+        # Проверяем, находится ли пользователь в списке авторизованных
         if user_id not in AUTHORIZED_USERS:
-            logger.info(f"User {user_id} attempted to use /mute command but is not authorized.")
-            update.message.reply_text("You are not authorized to use this command.")
+            logger.info(f"Пользователь {user_id} попытался использовать команду /mute, но не имеет прав.")
+            update.message.reply_text("У вас нет прав на использование этой команды.")
             return
 
-        if not context.args or len(context.args) < 1:
-            update.message.reply_text("Usage: /mute minutes\nYou need to reply to the user's message.")
+        if not context.args or len(context.args) < 2:
+            update.message.reply_text("Использование: /mute @username минуты")
             return
 
-        mute_duration = int(context.args[0])
+        username = context.args[0].lstrip('@')
+        mute_duration = int(context.args[1])
 
-        # Check if the command is a reply to a message
-        if not update.message.reply_to_message:
-            update.message.reply_text("The /mute command must be used in reply to the user's message.")
+        # Ищем пользователя в чате по username
+        try:
+            member = update.effective_chat.get_member(username)
+            target_user_id = member.user.id
+            target_username = member.user.username
+        except Exception as e:
+            logger.error(f"Ошибка при поиске пользователя {username}: {e}")
+            update.message.reply_text(f"Не удалось найти пользователя @{username} в этом чате.")
             return
 
-        # Get the target user ID
-        target_user_id = update.message.reply_to_message.from_user.id
-
-        # Determine when to unmute
+        # Определяем, когда снять мьют
         unmute_time = datetime.now() + timedelta(minutes=mute_duration)
         muted_users[target_user_id] = unmute_time
 
-        update.message.reply_text(f"User has been muted for {mute_duration} minutes.")
+        update.message.reply_text(f"Пользователь @{target_username} замьючен на {mute_duration} минут.")
     except Exception as e:
-        logger.error(f"Error in mute_user: {e}")
-        update.message.reply_text("An error occurred while executing the command.")
+        logger.error(f"Ошибка в mute_user: {e}")
+        update.message.reply_text("Произошла ошибка при выполнении команды.")
 
 def ban_user(update: Update, context: CallbackContext):
     """Команда для бана пользователя"""
@@ -310,32 +313,44 @@ def ban_user(update: Update, context: CallbackContext):
         update.message.reply_text("Произошла ошибка при выполнении команды.")
 
 def unban_user(update: Update, context: CallbackContext):
-    """Unbans a user by removing them from banned_users and muted_users."""
+    """Команда для разблокировки пользователя по username"""
     try:
         user_id = update.message.from_user.id
 
-        # Check if the user is authorized
+        # Проверяем, находится ли пользователь в списке авторизованных
         if user_id not in AUTHORIZED_USERS:
-            logger.info(f"User {user_id} attempted to use /unban command but is not authorized.")
-            update.message.reply_text("You are not authorized to use this command.")
+            logger.info(f"Пользователь {user_id} попытался использовать команду /unban, но не имеет прав.")
+            update.message.reply_text("У вас нет прав на использование этой команды.")
             return
 
-        # Check if the command is a reply to a message
-        if not update.message.reply_to_message:
-            update.message.reply_text("The /unban command must be used in reply to the user's message.")
+        if not context.args or len(context.args) < 1:
+            update.message.reply_text("Использование: /unban @username")
             return
 
-        # Get the target user ID
-        target_user_id = update.message.reply_to_message.from_user.id
+        username = context.args[0].lstrip('@')
 
-        # Remove the user from muted_users and banned_users
-        muted_users.pop(target_user_id, None)
-        banned_users.pop(target_user_id, None)
+        # Ищем пользователя в чате по username
+        try:
+            member = update.effective_chat.get_member(username)
+            target_user_id = member.user.id
+            target_username = member.user.username
+        except Exception as e:
+            logger.error(f"Ошибка при поиске пользователя {username}: {e}")
+            update.message.reply_text(f"Не удалось найти пользователя @{username} в этом чате.")
+            return
 
-        update.message.reply_text(f"User has been unbanned/unmuted.")
+        # Удаляем пользователя из списков muted_users и banned_users
+        был_замьючен = muted_users.pop(target_user_id, None) is not None
+        был_забанен = banned_users.pop(target_user_id, None) is not None
+
+        if был_замьючен or был_забанен:
+            update.message.reply_text(f"Пользователь @{target_username} был разблокирован.")
+        else:
+            update.message.reply_text(f"Пользователь @{target_username} не был замьючен или забанен.")
+
     except Exception as e:
-        logger.error(f"Error in unban_user: {e}")
-        update.message.reply_text("An error occurred while executing the command.")
+        logger.error(f"Ошибка в unban_user: {e}")
+        update.message.reply_text("Произошла ошибка при выполнении команды.")
 
 def main():
     updater = Updater(token=TELEGRAM_API_TOKEN, use_context=True)
