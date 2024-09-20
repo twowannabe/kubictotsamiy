@@ -112,17 +112,17 @@ def extract_keywords_from_question(question):
     return keywords
 
 def search_messages_by_keywords(keywords, limit=50):
-    """Поиск сообщений по ключевым словам в базе данных, с ограничением на количество."""
+    """Поиск сообщений по ключевым словам в базе данных для FIXED_USER_ID, с ограничением на количество."""
     try:
         cur = conn.cursor()
-        # Формируем SQL запрос для поиска сообщений с ограничением по количеству (LIMIT)
-        query = f"SELECT text FROM messages WHERE " + " OR ".join([f"text ILIKE %s" for _ in keywords]) + f" LIMIT {limit}"
-        cur.execute(query, [f"%{keyword}%" for keyword in keywords])
+        # Формируем SQL запрос для поиска сообщений с фильтрацией по user_id и ограничением по количеству (LIMIT)
+        query = f"SELECT text FROM messages WHERE user_id = %s AND (" + " OR ".join([f"text ILIKE %s" for _ in keywords]) + f") LIMIT {limit}"
+        cur.execute(query, [FIXED_USER_ID] + [f"%{keyword}%" for keyword in keywords])
         messages = [row[0] for row in cur.fetchall()]
         cur.close()
 
         # Логируем найденные сообщения
-        logger.info(f"Найденные сообщения: {messages}")
+        logger.info(f"Найденные сообщения для FIXED_USER_ID: {messages}")
 
         return messages
     except Exception as e:
@@ -133,24 +133,36 @@ def generate_answer_by_topic(user_question, related_messages):
     """Генерация ответа на основе сообщений, содержащих ключевые слова из вопроса."""
     truncated_messages = " ".join(related_messages)
 
+    # Ограничиваем общий объём текста для OpenAI до 2000 символов
+    if len(truncated_messages) > 2000:
+        truncated_messages = truncated_messages[:2000] + '...'
+
+    # Логируем найденные сообщения
+    logger.info(f"Найденные сообщения для генерации ответа: {truncated_messages}")
+
     prompt = f"На основе приведенных ниже сообщений пользователя, сформулируй связное мнение от его имени. \n\nСообщения пользователя:\n{truncated_messages}\n\nВопрос пользователя: {user_question}\nОтвет:"
 
     try:
+        # Логируем отправляемый запрос
+        logger.info(f"Запрос в OpenAI: {prompt}")
+
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",  # Замените модель на нужную
+            model="gpt-4",  # Убедитесь, что используете правильную модель
             messages=[
                 {"role": "system", "content": "Ты помощник, который отвечает от имени пользователя на основании его сообщений."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=100,  # Ограничение по количеству токенов
+            max_tokens=250,  # Ограничиваем количество токенов
             n=1,
             stop=None,
             temperature=0.7,
         )
         answer = response['choices'][0]['message']['content'].strip()
 
-        # Ограничиваем текст до 10 слов
-        return truncate_to_ten_words(answer)
+        # Логируем полученный ответ от OpenAI
+        logger.info(f"Ответ OpenAI: {answer}")
+
+        return answer  # Возвращаем полный ответ
     except Exception as e:
         logger.error(f"Ошибка при запросе к OpenAI API: {e}")
         return ""
