@@ -372,25 +372,15 @@ def unban_user(update: Update, context: CallbackContext):
             return
 
         username = context.args[0].lstrip('@')
+        chat_id = update.message.chat_id
 
-        # Ищем user_id по username в базе данных
+        # Получаем user_id по username с помощью get_chat_member
         try:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT DISTINCT user_id FROM banned_messages WHERE username = %s",
-                (username,)
-            )
-            result = cur.fetchone()
-            cur.close()
-
-            if result:
-                target_user_id = result[0]
-            else:
-                update.message.reply_text(f"Пользователь @{username} не найден в базе данных.")
-                return
+            member = context.bot.get_chat_member(chat_id=chat_id, user_id=username)
+            target_user_id = member.user.id
         except Exception as e:
-            logger.error(f"Ошибка при поиске пользователя в базе данных: {e}")
-            update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
+            logger.error(f"Ошибка при получении информации о пользователе @{username}: {e}")
+            update.message.reply_text(f"Не удалось найти пользователя @{username} в этом чате.")
             return
 
         # Удаляем пользователя из списков muted_users и banned_users
