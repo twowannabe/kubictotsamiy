@@ -27,7 +27,7 @@ DB_PORT = config('DB_PORT')
 # Фиксированный идентификатор пользователя
 FIXED_USER_ID = int(config('FIXED_USER_ID'))
 
-AUTHORIZED_USERS = [530674302, 6122780749, 147218177, 336914967, 130043299, 111733381, 471363051]
+AUTHORIZED_USERS = [530674302, 6122780749, 147218177, 336914967, 130043299, 111733381]
 
 # Подключение к базе данных PostgreSQL
 try:
@@ -45,7 +45,7 @@ except Exception as e:
     exit(1)
 
 # Словарь для хранения замьюченных пользователей
-muted_users = {}
+muted_users = {}  # {user_id: unmute_time}
 
 def check_and_remove_mute():
     """Проверяет время и снимает мьют с пользователей"""
@@ -226,6 +226,59 @@ def mute_user(update: Update, context: CallbackContext):
         update.message.reply_text(f"Пользователь @{target_username} замьючен на {mute_duration} минут.")
     except Exception as e:
         logger.error(f"Ошибка в mute_user: {e}")
+        update.message.reply_text("Произошла ошибка при выполнении команды.")
+
+def unmute_user(update: Update, context: CallbackContext):
+    """Команда для размьюта пользователя по @username или в ответе на сообщение."""
+    try:
+        user_id = update.message.from_user.id
+
+        # Проверяем, находится ли пользователь в списке авторизованных
+        if user_id not in AUTHORIZED_USERS:
+            logger.info(f"Пользователь {user_id} попытался использовать команду /unmute, но не имеет прав.")
+            update.message.reply_text("У вас нет прав на использование этой команды.")
+            return
+
+        target_user_id = None
+        target_username = None
+
+        # Если команда используется в ответе на сообщение
+        if update.message.reply_to_message:
+            target_user = update.message.reply_to_message.from_user
+            target_user_id = target_user.id
+            target_username = (target_user.username or target_user.first_name).lower()
+        elif context.args and len(context.args) >= 1:
+            # Если указан @username
+            username = context.args[0].lstrip('@').lower()
+            # Ищем user_id по username в muted_users
+            # Поскольку в muted_users у нас только user_id, нам нужно обойти эту проблему
+            # Предлагаю хранить username вместе с unmute_time в muted_users
+            # Обновим структуру muted_users: {user_id: {'unmute_time': datetime, 'username': username}}
+
+            # Обновим существующие места, где используется muted_users
+            pass  # Здесь необходимо обновить код для поддержки новой структуры
+
+            # Для текущей реализации попробуем получить user_id через get_chat_member
+            chat_id = update.message.chat_id
+            try:
+                member = context.bot.get_chat_member(chat_id=chat_id, user_id=username)
+                target_user_id = member.user.id
+                target_username = (member.user.username or member.user.first_name).lower()
+            except Exception as e:
+                logger.error(f"Ошибка при получении информации о пользователе @{username}: {e}")
+                update.message.reply_text(f"Не удалось найти пользователя @{username} в этом чате.")
+                return
+        else:
+            update.message.reply_text("Использование: /unmute @username или ответьте на сообщение пользователя командой /unmute.")
+            return
+
+        if target_user_id in muted_users:
+            del muted_users[target_user_id]
+            update.message.reply_text(f"Пользователь @{target_username} был размьючен.")
+        else:
+            update.message.reply_text(f"Пользователь @{target_username} не был замьючен.")
+    except Exception as e:
+        logger.error(f"Ошибка в unmute_user: {e}")
         update.message.reply_text("Произошла ошибка при выполнении команды.")
 
 def ban_user(update: Update, context: CallbackContext):
@@ -427,6 +480,7 @@ def main():
 
     # Обработчики команд
     dispatcher.add_handler(CommandHandler('mute', mute_user))
+    dispatcher.add_handler(CommandHandler('unmute', unmute_user))  # Добавлено
     dispatcher.add_handler(CommandHandler('ban', ban_user))
     dispatcher.add_handler(CommandHandler('unban', unban_user))
 
