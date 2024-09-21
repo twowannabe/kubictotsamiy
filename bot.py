@@ -250,16 +250,9 @@ def unmute_user(update: Update, context: CallbackContext):
         elif context.args and len(context.args) >= 1:
             # Если указан @username
             username = context.args[0].lstrip('@').lower()
-            # Ищем user_id по username в muted_users
-            # Поскольку в muted_users у нас только user_id, нам нужно обойти эту проблему
-            # Предлагаю хранить username вместе с unmute_time в muted_users
-            # Обновим структуру muted_users: {user_id: {'unmute_time': datetime, 'username': username}}
-
-            # Обновим существующие места, где используется muted_users
-            pass  # Здесь необходимо обновить код для поддержки новой структуры
-
-            # Для текущей реализации попробуем получить user_id через get_chat_member
             chat_id = update.message.chat_id
+
+            # Пытаемся получить user_id через get_chat_member
             try:
                 member = context.bot.get_chat_member(chat_id=chat_id, user_id=username)
                 target_user_id = member.user.id
@@ -282,7 +275,7 @@ def unmute_user(update: Update, context: CallbackContext):
         update.message.reply_text("Произошла ошибка при выполнении команды.")
 
 def ban_user(update: Update, context: CallbackContext):
-    """Команда для бана пользователя и удаления всех его сообщений"""
+    """Команда для бана пользователя по @username или в ответе на сообщение."""
     try:
         user_id = update.message.from_user.id
 
@@ -292,16 +285,68 @@ def ban_user(update: Update, context: CallbackContext):
             update.message.reply_text("У вас нет прав на использование этой команды.")
             return
 
-        # Проверяем, является ли команда ответом на сообщение
-        if not update.message.reply_to_message:
-            update.message.reply_text("Команда /ban должна быть ответом на сообщение пользователя.")
+        target_user_id = None
+        target_username = None
+        chat_id = update.message.chat_id
+
+        # Если команда используется в ответе на сообщение
+        if update.message.reply_to_message:
+            target_user = update.message.reply_to_message.from_user
+            target_user_id = target_user.id
+            target_username = (target_user.username or target_user.first_name).lower()
+        elif context.args and len(context.args) >= 1:
+            # Если указан @username
+            username = context.args[0].lstrip('@').lower()
+
+            # Пытаемся получить user_id через get_chat_member
+            try:
+                member = context.bot.get_chat_member(chat_id=chat_id, user_id=username)
+                target_user_id = member.user.id
+                target_username = (member.user.username or member.user.first_name).lower()
+            except Exception as e:
+                logger.error(f"Ошибка при получении информации о пользователе @{username}: {e}")
+
+                # Если не удалось получить через get_chat_member, пробуем найти в базе данных
+                try:
+                    # Ищем user_id в таблице banned_messages
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT DISTINCT user_id FROM banned_messages WHERE LOWER(username) = %s",
+                        (username,)
+                    )
+                    result = cur.fetchone()
+                    cur.close()
+
+                    if result:
+                        target_user_id = result[0]
+                        target_username = username
+                    else:
+                        # Пробуем найти в таблице banned_users
+                        cur = conn.cursor()
+                        cur.execute(
+                            "SELECT user_id FROM banned_users WHERE LOWER(username) = %s",
+                            (username,)
+                        )
+                        result = cur.fetchone()
+                        cur.close()
+
+                        if result:
+                            target_user_id = result[0]
+                            target_username = username
+                        else:
+                            update.message.reply_text(f"Не удалось найти пользователя @{username} в базе данных.")
+                            return
+                except Exception as e:
+                    logger.error(f"Ошибка при поиске пользователя в базе данных: {e}")
+                    update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
+                    return
+        else:
+            update.message.reply_text("Использование: /ban @username или ответьте на сообщение пользователя командой /ban.")
             return
 
-        # Получаем информацию о пользователе, которого банят
-        target_user = update.message.reply_to_message.from_user
-        target_user_id = target_user.id
-        target_username = (target_user.username or target_user.first_name).lower()
-        chat_id = update.message.chat_id
+        if not target_user_id:
+            update.message.reply_text(f"Не удалось получить user_id пользователя @{target_username}.")
+            return
 
         # Определяем, когда снять бан (например, через 10 минут)
         ban_end_time = datetime.now() + timedelta(minutes=10)
@@ -322,20 +367,20 @@ def ban_user(update: Update, context: CallbackContext):
         try:
             cur = conn.cursor()
             cur.execute(
-                "SELECT message_id FROM banned_messages WHERE chat_id = %s AND user_id = %s",
-                (chat_id, target_user_id)
+                "SELECT message_id, chat_id FROM banned_messages WHERE user_id = %s",
+                (target_user_id,)
             )
             messages = cur.fetchall()
-            for (msg_id,) in messages:
+            for msg_id, msg_chat_id in messages:
                 try:
-                    context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                    context.bot.delete_message(chat_id=msg_chat_id, message_id=msg_id)
                     logger.info(f"Удалено сообщение с ID {msg_id} от пользователя {target_username} (ID: {target_user_id}).")
                 except Exception as e:
                     logger.error(f"Ошибка при удалении сообщения с ID {msg_id}: {e}")
             # Удаляем записи из базы данных
             cur.execute(
-                "DELETE FROM banned_messages WHERE chat_id = %s AND user_id = %s",
-                (chat_id, target_user_id)
+                "DELETE FROM banned_messages WHERE user_id = %s",
+                (target_user_id,)
             )
             cur.close()
         except Exception as e:
@@ -480,8 +525,8 @@ def main():
 
     # Обработчики команд
     dispatcher.add_handler(CommandHandler('mute', mute_user))
-    dispatcher.add_handler(CommandHandler('unmute', unmute_user))  # Добавлено
-    dispatcher.add_handler(CommandHandler('ban', ban_user))
+    dispatcher.add_handler(CommandHandler('unmute', unmute_user))
+    dispatcher.add_handler(CommandHandler('ban', ban_user))  # Обновлено
     dispatcher.add_handler(CommandHandler('unban', unban_user))
 
     # Обработчики сообщений
