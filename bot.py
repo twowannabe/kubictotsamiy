@@ -22,7 +22,7 @@ DB_HOST = config('DB_HOST')
 DB_PORT = config('DB_PORT')
 
 # Список авторизованных пользователей (добавьте сюда Telegram user_id тех, кто может управлять ботом)
-AUTHORIZED_USERS = [530674302, 6122780749, 147218177, 336914967, 130043299, 111733381, 471363051]
+AUTHORIZED_USERS = [530674302, 6122780749, 147218177, 336914967, 130043299, 111733381]
 
 # Подключение к базе данных PostgreSQL
 try:
@@ -418,48 +418,59 @@ def unban_user(update: Update, context: CallbackContext):
         logger.error(f"Ошибка в unban_user: {e}")
         update.message.reply_text("Произошла ошибка при выполнении команды.")
 
-def unmute_user(update: Update, context: CallbackContext):
-    """Размьютит пользователя по @username или в ответе на сообщение."""
+def wipe_messages(update: Update, context: CallbackContext):
+    """Удаляет все сообщения пользователя, вызывающего команду, в текущем чате."""
     try:
         user_id = update.message.from_user.id
 
         # Проверяем, находится ли пользователь в списке авторизованных
         if user_id not in AUTHORIZED_USERS:
-            logger.info(f"Пользователь {user_id} попытался использовать команду /unmute, но не имеет прав.")
+            logger.info(f"Пользователь {user_id} попытался использовать команду /wipe, но не имеет прав.")
             update.message.reply_text("У вас нет прав на использование этой команды.")
             return
 
-        target_user_id = None
-        target_username = None
+        chat_id = update.message.chat_id
 
-        # Если команда используется в ответе на сообщение
-        if update.message.reply_to_message:
-            target_user = update.message.reply_to_message.from_user
-            target_user_id = target_user.id
-            target_username = (target_user.username or target_user.first_name).lower()
-        elif context.args and len(context.args) >= 1:
-            # Размьют по @username
-            username = context.args[0].lstrip('@').lower()
-            chat_id = update.message.chat_id
-            try:
-                member = context.bot.get_chat_member(chat_id=chat_id, user_id=username)
-                target_user_id = member.user.id
-                target_username = (member.user.username or member.user.first_name).lower()
-            except Exception as e:
-                logger.error(f"Ошибка при получении информации о пользователе @{username}: {e}")
-                update.message.reply_text(f"Не удалось найти пользователя @{username} в этом чате.")
+        # Получаем все message_id пользователя из таблицы banned_messages для текущего чата
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT message_id FROM banned_messages WHERE user_id = %s AND chat_id = %s",
+                (user_id, chat_id)
+            )
+            messages = cur.fetchall()
+            cur.close()
+
+            if not messages:
+                update.message.reply_text("У вас нет сохраненных сообщений для удаления.")
                 return
-        else:
-            update.message.reply_text("Использование: /unmute @username или ответьте на сообщение пользователя командой /unmute.")
-            return
 
-        if target_user_id in muted_users:
-            del muted_users[target_user_id]
-            update.message.reply_text(f"Пользователь @{target_username} был размьючен.")
-        else:
-            update.message.reply_text(f"Пользователь @{target_username} не был замьючен.")
+            deleted_count = 0
+            for (msg_id,) in messages:
+                try:
+                    context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                    deleted_count += 1
+                    logger.info(f"Удалено сообщение ID {msg_id} пользователя ID {user_id}.")
+                except Exception as e:
+                    logger.error(f"Ошибка при удалении сообщения ID {msg_id}: {e}")
+
+            # Удаляем записи о сообщениях из базы данных
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "DELETE FROM banned_messages WHERE user_id = %s AND chat_id = %s",
+                    (user_id, chat_id)
+                )
+                cur.close()
+            except Exception as e:
+                logger.error(f"Ошибка при удалении записей сообщений из базы данных: {e}")
+
+            update.message.reply_text(f"Удалено {deleted_count} ваших сообщений.")
+        except Exception as e:
+            logger.error(f"Ошибка при получении сообщений для удаления: {e}")
+            update.message.reply_text("Произошла ошибка при попытке удалить ваши сообщения.")
     except Exception as e:
-        logger.error(f"Ошибка в unmute_user: {e}")
+        logger.error(f"Ошибка в wipe_messages: {e}")
         update.message.reply_text("Произошла ошибка при выполнении команды.")
 
 def help_command(update: Update, context: CallbackContext):
@@ -494,11 +505,16 @@ def help_command(update: Update, context: CallbackContext):
             "   - **Использование:**\n"
             "     - `/unban @username` — разбанить пользователя.\n"
             "   - **Описание:** Снимает бан с пользователя, позволяя ему снова отправлять сообщения.\n\n"
+            "**5. /wipe**\n"
+            "   - **Использование:**\n"
+            "     - `/wipe` — удаляет все ваши сообщения в этом чате.\n"
+            "   - **Описание:** Удаляет все ваши сообщения, которые бот сохранил в базе данных для этого чата.\n\n"
             "🔧 **Примеры:**\n"
             "   - `/ban @vladixoxo 30` — забанить пользователя @vladixoxo на 30 минут.\n"
             "   - Ответьте на сообщение пользователя и введите `/ban 15` — забанить этого пользователя на 15 минут.\n"
             "   - `/mute @user123` — замьютить пользователя @user123 на 10 минут.\n"
-            "   - Ответьте на сообщение пользователя и введите `/unmute` — размьютить этого пользователя.\n\n"
+            "   - Ответьте на сообщение пользователя и введите `/unmute` — размьютить этого пользователя.\n"
+            "   - `/wipe` — удалить все ваши сообщения в этом чате.\n\n"
             "⚠️ **Важно:** Все команды доступны только авторизованным пользователям."
         )
 
@@ -517,6 +533,7 @@ def main():
     dispatcher.add_handler(CommandHandler('unmute', unmute_user))
     dispatcher.add_handler(CommandHandler('ban', ban_user))
     dispatcher.add_handler(CommandHandler('unban', unban_user))
+    dispatcher.add_handler(CommandHandler('wipe', wipe_messages))  # Добавлена команда /wipe
     dispatcher.add_handler(CommandHandler('help', help_command))  # Добавлена команда /help
 
     # Обработчики сообщений
