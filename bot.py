@@ -192,8 +192,8 @@ def handle_message(update: Update, context: CallbackContext):
     try:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO banned_messages (chat_id, user_id, message_id) VALUES (%s, %s, %s)",
-            (chat_id, user_id, message_id)
+            "INSERT INTO banned_messages (chat_id, user_id, username, message_id) VALUES (%s, %s, %s, %s)",
+            (chat_id, user_id, username, message_id)
         )
         cur.close()
     except Exception as e:
@@ -259,8 +259,8 @@ def handle_edited_message(update: Update, context: CallbackContext):
     try:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO banned_messages (chat_id, user_id, message_id) VALUES (%s, %s, %s)",
-            (chat_id, user_id, message_id)
+            "INSERT INTO banned_messages (chat_id, user_id, username, message_id) VALUES (%s, %s, %s, %s)",
+            (chat_id, user_id, username, message_id)
         )
         cur.close()
     except Exception as e:
@@ -357,7 +357,7 @@ def ban_user(update: Update, context: CallbackContext):
         update.message.reply_text("Произошла ошибка при выполнении команды.")
 
 def unban_user(update: Update, context: CallbackContext):
-    """Команда для разблокировки пользователя (используется как ответ на сообщение пользователя)"""
+    """Команда для разблокировки пользователя по username"""
     try:
         user_id = update.message.from_user.id
 
@@ -367,21 +367,40 @@ def unban_user(update: Update, context: CallbackContext):
             update.message.reply_text("У вас нет прав на использование этой команды.")
             return
 
-        # Проверяем, является ли команда ответом на сообщение
-        if not update.message.reply_to_message:
-            update.message.reply_text("Команда /unban должна быть ответом на сообщение пользователя.")
+        if not context.args or len(context.args) < 1:
+            update.message.reply_text("Использование: /unban @username")
             return
 
-        # Получаем информацию о пользователе
-        target_user = update.message.reply_to_message.from_user
-        target_user_id = target_user.id
-        target_username = target_user.username or target_user.first_name
+        username = context.args[0].lstrip('@')
+
+        # Ищем user_id по username в базе данных
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT DISTINCT user_id FROM banned_messages WHERE username = %s",
+                (username,)
+            )
+            result = cur.fetchone()
+            cur.close()
+
+            if result:
+                target_user_id = result[0]
+            else:
+                update.message.reply_text(f"Пользователь @{username} не найден в базе данных.")
+                return
+        except Exception as e:
+            logger.error(f"Ошибка при поиске пользователя в базе данных: {e}")
+            update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
+            return
 
         # Удаляем пользователя из списков muted_users и banned_users
         был_замьючен = muted_users.pop(target_user_id, None) is not None
         был_забанен = banned_users.pop(target_user_id, None) is not None
 
-        update.message.reply_text(f"Пользователь @{target_username} был разблокирован.")
+        if был_замьючен or был_забанен:
+            update.message.reply_text(f"Пользователь @{username} был разблокирован.")
+        else:
+            update.message.reply_text(f"Пользователь @{username} не был замьючен или забанен.")
     except Exception as e:
         logger.error(f"Ошибка в unban_user: {e}")
         update.message.reply_text("Произошла ошибка при выполнении команды.")
