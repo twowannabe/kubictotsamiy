@@ -188,17 +188,26 @@ def mute_user(update: Update, context: CallbackContext):
             if args[0].startswith('@'):
                 # Мьют по @username
                 username = args[0].lstrip('@').lower()
-                chat_id = update.message.chat_id
                 try:
-                    member = context.bot.get_chat_member(chat_id=chat_id, user_id=username)
-                    target_user_id = member.user.id
-                    target_username = (member.user.username or member.user.first_name).lower()
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT user_id FROM banned_messages WHERE LOWER(username) = %s LIMIT 1",
+                        (username,)
+                    )
+                    result = cur.fetchone()
+                    cur.close()
+                    if result:
+                        target_user_id = result[0]
+                        target_username = username
+                    else:
+                        update.message.reply_text(f"Не удалось найти пользователя @{username} в базе данных.")
+                        return
+                    if len(args) > 1 and args[1].isdigit():
+                        mute_duration = int(args[1])
                 except Exception as e:
                     logger.error(f"Ошибка при получении информации о пользователе @{username}: {e}")
-                    update.message.reply_text(f"Не удалось найти пользователя @{username} в этом чате.")
+                    update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
                     return
-                if len(args) > 1 and args[1].isdigit():
-                    mute_duration = int(args[1])
             elif args[0].isdigit():
                 # Мьют самого себя на заданное количество минут (редкий случай)
                 mute_duration = int(args[0])
@@ -246,14 +255,23 @@ def unmute_user(update: Update, context: CallbackContext):
         elif context.args and len(context.args) >= 1:
             # Размьют по @username
             username = context.args[0].lstrip('@').lower()
-            chat_id = update.message.chat_id
             try:
-                member = context.bot.get_chat_member(chat_id=chat_id, user_id=username)
-                target_user_id = member.user.id
-                target_username = (member.user.username or member.user.first_name).lower()
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT user_id FROM banned_messages WHERE LOWER(username) = %s LIMIT 1",
+                    (username,)
+                )
+                result = cur.fetchone()
+                cur.close()
+                if result:
+                    target_user_id = result[0]
+                    target_username = username
+                else:
+                    update.message.reply_text(f"Не удалось найти пользователя @{username} в базе данных.")
+                    return
             except Exception as e:
                 logger.error(f"Ошибка при получении информации о пользователе @{username}: {e}")
-                update.message.reply_text(f"Не удалось найти пользователя @{username} в этом чате.")
+                update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
                 return
         else:
             update.message.reply_text("Использование: /unmute @username или ответьте на сообщение пользователя командой /unmute.")
@@ -295,17 +313,26 @@ def ban_user(update: Update, context: CallbackContext):
             if args[0].startswith('@'):
                 # Бан по @username
                 username = args[0].lstrip('@').lower()
-                chat_id = update.message.chat_id
                 try:
-                    member = context.bot.get_chat_member(chat_id=chat_id, user_id=username)
-                    target_user_id = member.user.id
-                    target_username = (member.user.username or member.user.first_name).lower()
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT user_id FROM banned_messages WHERE LOWER(username) = %s LIMIT 1",
+                        (username,)
+                    )
+                    result = cur.fetchone()
+                    cur.close()
+                    if result:
+                        target_user_id = result[0]
+                        target_username = username
+                    else:
+                        update.message.reply_text(f"Не удалось найти пользователя @{username} в базе данных.")
+                        return
+                    if len(args) > 1 and args[1].isdigit():
+                        ban_duration = int(args[1])
                 except Exception as e:
                     logger.error(f"Ошибка при получении информации о пользователе @{username}: {e}")
-                    update.message.reply_text(f"Не удалось найти пользователя @{username} в этом чате.")
+                    update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
                     return
-                if len(args) > 1 and args[1].isdigit():
-                    ban_duration = int(args[1])
             elif args[0].isdigit():
                 # Бан самого себя на заданное количество минут (редкий случай)
                 ban_duration = int(args[0])
@@ -515,7 +542,8 @@ def help_command(update: Update, context: CallbackContext):
             "   - `/mute @user123` — замьютить пользователя @user123 на 10 минут.\n"
             "   - Ответьте на сообщение пользователя и введите `/unmute` — размьютить этого пользователя.\n"
             "   - `/wipe` — удалить все ваши сообщения в этом чате.\n\n"
-            "⚠️ **Важно:** Все команды доступны только авторизованным пользователям."
+            "⚠️ **Важно:** Все команды доступны только авторизованным пользователям.\n\n"
+            "📌 **Примечание:** При использовании команд по @username убедитесь, что пользователь ранее отправлял сообщения в чат, чтобы его информация была сохранена в базе данных."
         )
 
         update.message.reply_text(help_text, parse_mode='Markdown')
@@ -533,8 +561,8 @@ def main():
     dispatcher.add_handler(CommandHandler('unmute', unmute_user))
     dispatcher.add_handler(CommandHandler('ban', ban_user))
     dispatcher.add_handler(CommandHandler('unban', unban_user))
-    dispatcher.add_handler(CommandHandler('wipe', wipe_messages))  # Добавлена команда /wipe
-    dispatcher.add_handler(CommandHandler('help', help_command))  # Добавлена команда /help
+    dispatcher.add_handler(CommandHandler('wipe', wipe_messages))
+    dispatcher.add_handler(CommandHandler('help', help_command))
 
     # Обработчики сообщений
     dispatcher.add_handler(MessageHandler(Filters.all & ~Filters.command, handle_message))
