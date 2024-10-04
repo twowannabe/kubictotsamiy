@@ -228,7 +228,7 @@ async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         unmute_time = datetime.now() + timedelta(minutes=mute_duration)
         muted_users[target_user_id] = unmute_time
 
-        await update.message.reply_text(f"Пользователь @{target_username} замьючен на {mute_duration} минут.")
+        await update.message.reply_text(f"Пользователь @{target_username} берёт в ротек {mute_duration} минут.")
     except Exception as e:
         logger.error(f"Ошибка в mute_user: {e}")
         await update.message.reply_text("Произошла ошибка при выполнении команды.")
