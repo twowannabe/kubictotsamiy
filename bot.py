@@ -1,6 +1,6 @@
 import logging
 from decouple import config
-from telegram.ext import Updater, MessageHandler, Filters, CallbackContext, CommandHandler
+from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters
 from telegram import Update
 from datetime import datetime, timedelta
 import psycopg2
@@ -77,7 +77,7 @@ def is_user_banned(user_id):
         logger.error(f"Ошибка при проверке статуса бана пользователя: {e}")
         return False
 
-def handle_message(update: Update, context: CallbackContext):
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает входящие сообщения и удаляет их, если пользователь замьючен или забанен."""
     if not update.message:
         logger.error("Сообщение не найдено в обновлении.")
@@ -99,7 +99,7 @@ def handle_message(update: Update, context: CallbackContext):
         status = "замьючен" if user_id in muted_users else "забанен"
         logger.info(f"Пользователь {username} (ID: {user_id}) {status}. Удаление сообщения.")
         try:
-            context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
             logger.info(f"Сообщение от {status} пользователя {username} (ID: {user_id}) было удалено.")
             return
         except Exception as e:
@@ -119,7 +119,7 @@ def handle_message(update: Update, context: CallbackContext):
     except Exception as e:
         logger.error(f"Ошибка при сохранении сообщения в базе данных: {e}")
 
-def handle_edited_message(update: Update, context: CallbackContext):
+async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает отредактированные сообщения и удаляет их, если пользователь замьючен или забанен."""
     if not update.edited_message:
         logger.error("Отредактированное сообщение не найдено в обновлении.")
@@ -141,7 +141,7 @@ def handle_edited_message(update: Update, context: CallbackContext):
         status = "замьючен" if user_id in muted_users else "забанен"
         logger.info(f"Пользователь {username} (ID: {user_id}) {status}. Удаление отредактированного сообщения.")
         try:
-            context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
             logger.info(f"Отредактированное сообщение от {status} пользователя {username} (ID: {user_id}) было удалено.")
             return
         except Exception as e:
@@ -161,7 +161,7 @@ def handle_edited_message(update: Update, context: CallbackContext):
     except Exception as e:
         logger.error(f"Ошибка при сохранении отредактированного сообщения в базе данных: {e}")
 
-def mute_user(update: Update, context: CallbackContext):
+async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Мьютит пользователя по @username, в ответе на сообщение или на заданное количество минут."""
     try:
         user_id = update.message.from_user.id
@@ -169,7 +169,7 @@ def mute_user(update: Update, context: CallbackContext):
         # Проверяем, находится ли пользователь в списке авторизованных
         if user_id not in AUTHORIZED_USERS:
             logger.info(f"Пользователь {user_id} попытался использовать команду /mute, но не имеет прав.")
-            update.message.reply_text("У вас нет прав на использование этой команды.")
+            await update.message.reply_text("У вас нет прав на использование этой команды.")
             return
 
         args = context.args
@@ -200,13 +200,13 @@ def mute_user(update: Update, context: CallbackContext):
                         target_user_id = result[0]
                         target_username = username
                     else:
-                        update.message.reply_text(f"Не удалось найти пользователя @{username} в базе данных.")
+                        await update.message.reply_text(f"Не удалось найти пользователя @{username} в базе данных.")
                         return
                     if len(args) > 1 and args[1].isdigit():
                         mute_duration = int(args[1])
                 except Exception as e:
                     logger.error(f"Ошибка при получении информации о пользователе @{username}: {e}")
-                    update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
+                    await update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
                     return
             elif args[0].isdigit():
                 # Мьют самого себя на заданное количество минут (редкий случай)
@@ -214,26 +214,26 @@ def mute_user(update: Update, context: CallbackContext):
                 target_user_id = user_id
                 target_username = (update.message.from_user.username or update.message.from_user.first_name).lower()
             else:
-                update.message.reply_text("Использование: /mute @username [минуты] или ответьте на сообщение пользователя командой /mute [минуты].")
+                await update.message.reply_text("Использование: /mute @username [минуты] или ответьте на сообщение пользователя командой /mute [минуты].")
                 return
         else:
-            update.message.reply_text("Использование: /mute @username [минуты] или ответьте на сообщение пользователя командой /mute [минуты].")
+            await update.message.reply_text("Использование: /mute @username [минуты] или ответьте на сообщение пользователя командой /mute [минуты].")
             return
 
         if not target_user_id:
-            update.message.reply_text("Не удалось определить пользователя для мьюта.")
+            await update.message.reply_text("Не удалось определить пользователя для мьюта.")
             return
 
         # Устанавливаем время размьюта
         unmute_time = datetime.now() + timedelta(minutes=mute_duration)
         muted_users[target_user_id] = unmute_time
 
-        update.message.reply_text(f"Пользователь @{target_username} замьючен на {mute_duration} минут.")
+        await update.message.reply_text(f"Пользователь @{target_username} замьючен на {mute_duration} минут.")
     except Exception as e:
         logger.error(f"Ошибка в mute_user: {e}")
-        update.message.reply_text("Произошла ошибка при выполнении команды.")
+        await update.message.reply_text("Произошла ошибка при выполнении команды.")
 
-def unmute_user(update: Update, context: CallbackContext):
+async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Размьютит пользователя по @username или в ответе на сообщение."""
     try:
         user_id = update.message.from_user.id
@@ -241,7 +241,7 @@ def unmute_user(update: Update, context: CallbackContext):
         # Проверяем, находится ли пользователь в списке авторизованных
         if user_id not in AUTHORIZED_USERS:
             logger.info(f"Пользователь {user_id} попытался использовать команду /unmute, но не имеет прав.")
-            update.message.reply_text("У вас нет прав на использование этой команды.")
+            await update.message.reply_text("У вас нет прав на использование этой команды.")
             return
 
         target_user_id = None
@@ -267,26 +267,26 @@ def unmute_user(update: Update, context: CallbackContext):
                     target_user_id = result[0]
                     target_username = username
                 else:
-                    update.message.reply_text(f"Не удалось найти пользователя @{username} в базе данных.")
+                    await update.message.reply_text(f"Не удалось найти пользователя @{username} в базе данных.")
                     return
             except Exception as e:
                 logger.error(f"Ошибка при получении информации о пользователе @{username}: {e}")
-                update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
+                await update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
                 return
         else:
-            update.message.reply_text("Использование: /unmute @username или ответьте на сообщение пользователя командой /unmute.")
+            await update.message.reply_text("Использование: /unmute @username или ответьте на сообщение пользователя командой /unmute.")
             return
 
         if target_user_id in muted_users:
             del muted_users[target_user_id]
-            update.message.reply_text(f"Пользователь @{target_username} был размьючен.")
+            await update.message.reply_text(f"Пользователь @{target_username} был размьючен.")
         else:
-            update.message.reply_text(f"Пользователь @{target_username} не был замьючен.")
+            await update.message.reply_text(f"Пользователь @{target_username} не был замьючен.")
     except Exception as e:
         logger.error(f"Ошибка в unmute_user: {e}")
-        update.message.reply_text("Произошла ошибка при выполнении команды.")
+        await update.message.reply_text("Произошла ошибка при выполнении команды.")
 
-def ban_user(update: Update, context: CallbackContext):
+async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Банит пользователя по @username, в ответе на сообщение или на заданное количество минут."""
     try:
         user_id = update.message.from_user.id
@@ -294,7 +294,7 @@ def ban_user(update: Update, context: CallbackContext):
         # Проверяем, находится ли пользователь в списке авторизованных
         if user_id not in AUTHORIZED_USERS:
             logger.info(f"Пользователь {user_id} попытался использовать команду /ban, но не имеет прав.")
-            update.message.reply_text("У вас нет прав на использование этой команды.")
+            await update.message.reply_text("У вас нет прав на использование этой команды.")
             return
 
         args = context.args
@@ -325,13 +325,13 @@ def ban_user(update: Update, context: CallbackContext):
                         target_user_id = result[0]
                         target_username = username
                     else:
-                        update.message.reply_text(f"Не удалось найти пользователя @{username} в базе данных.")
+                        await update.message.reply_text(f"Не удалось найти пользователя @{username} в базе данных.")
                         return
                     if len(args) > 1 and args[1].isdigit():
                         ban_duration = int(args[1])
                 except Exception as e:
                     logger.error(f"Ошибка при получении информации о пользователе @{username}: {e}")
-                    update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
+                    await update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
                     return
             elif args[0].isdigit():
                 # Бан самого себя на заданное количество минут (редкий случай)
@@ -339,14 +339,14 @@ def ban_user(update: Update, context: CallbackContext):
                 target_user_id = user_id
                 target_username = (update.message.from_user.username or update.message.from_user.first_name).lower()
             else:
-                update.message.reply_text("Использование: /ban @username [минуты] или ответьте на сообщение пользователя командой /ban [минуты].")
+                await update.message.reply_text("Использование: /ban @username [минуты] или ответьте на сообщение пользователя командой /ban [минуты].")
                 return
         else:
-            update.message.reply_text("Использование: /ban @username [минуты] или ответьте на сообщение пользователя командой /ban [минуты].")
+            await update.message.reply_text("Использование: /ban @username [минуты] или ответьте на сообщение пользователя командой /ban [минуты].")
             return
 
         if not target_user_id:
-            update.message.reply_text("Не удалось определить пользователя для бана.")
+            await update.message.reply_text("Не удалось определить пользователя для бана.")
             return
 
         # Устанавливаем время разбана
@@ -374,7 +374,7 @@ def ban_user(update: Update, context: CallbackContext):
             messages = cur.fetchall()
             for msg_id, msg_chat_id in messages:
                 try:
-                    context.bot.delete_message(chat_id=msg_chat_id, message_id=msg_id)
+                    await context.bot.delete_message(chat_id=msg_chat_id, message_id=msg_id)
                     logger.info(f"Удалено сообщение с ID {msg_id} от пользователя {target_username} (ID: {target_user_id}).")
                 except Exception as e:
                     logger.error(f"Ошибка при удалении сообщения с ID {msg_id}: {e}")
@@ -387,12 +387,12 @@ def ban_user(update: Update, context: CallbackContext):
         except Exception as e:
             logger.error(f"Ошибка при удалении сообщений из базы данных: {e}")
 
-        update.message.reply_text(f"Пользователь @{target_username} забанен на {ban_duration} минут, и все его сообщения были удалены.")
+        await update.message.reply_text(f"Пользователь @{target_username} забанен на {ban_duration} минут, и все его сообщения были удалены.")
     except Exception as e:
         logger.error(f"Ошибка в ban_user: {e}")
-        update.message.reply_text("Произошла ошибка при выполнении команды.")
+        await update.message.reply_text("Произошла ошибка при выполнении команды.")
 
-def unban_user(update: Update, context: CallbackContext):
+async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Разбанивает пользователя по @username."""
     try:
         user_id = update.message.from_user.id
@@ -400,11 +400,11 @@ def unban_user(update: Update, context: CallbackContext):
         # Проверяем, находится ли пользователь в списке авторизованных
         if user_id not in AUTHORIZED_USERS:
             logger.info(f"Пользователь {user_id} попытался использовать команду /unban, но не имеет прав.")
-            update.message.reply_text("У вас нет прав на использование этой команды.")
+            await update.message.reply_text("У вас нет прав на использование этой команды.")
             return
 
         if not context.args or len(context.args) < 1:
-            update.message.reply_text("Использование: /unban @username")
+            await update.message.reply_text("Использование: /unban @username")
             return
 
         username = context.args[0].lstrip('@').lower()
@@ -422,11 +422,11 @@ def unban_user(update: Update, context: CallbackContext):
             if result:
                 target_user_id = result[0]
             else:
-                update.message.reply_text(f"Пользователь @{username} не найден в списке забаненных пользователей.")
+                await update.message.reply_text(f"Пользователь @{username} не найден в списке забаненных пользователей.")
                 return
         except Exception as e:
             logger.error(f"Ошибка при поиске пользователя в базе данных: {e}")
-            update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
+            await update.message.reply_text("Произошла ошибка при поиске пользователя в базе данных.")
             return
 
         # Удаляем пользователя из таблицы banned_users
@@ -437,15 +437,15 @@ def unban_user(update: Update, context: CallbackContext):
                 (target_user_id,)
             )
             cur.close()
-            update.message.reply_text(f"Пользователь @{username} был разблокирован.")
+            await update.message.reply_text(f"Пользователь @{username} был разблокирован.")
         except Exception as e:
             logger.error(f"Ошибка при удалении пользователя из banned_users: {e}")
-            update.message.reply_text("Произошла ошибка при разблокировке пользователя.")
+            await update.message.reply_text("Произошла ошибка при разблокировке пользователя.")
     except Exception as e:
         logger.error(f"Ошибка в unban_user: {e}")
-        update.message.reply_text("Произошла ошибка при выполнении команды.")
+        await update.message.reply_text("Произошла ошибка при выполнении команды.")
 
-def wipe_messages(update: Update, context: CallbackContext):
+async def wipe_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Удаляет все сообщения пользователя, вызывающего команду, в текущем чате."""
     try:
         user_id = update.message.from_user.id
@@ -453,7 +453,7 @@ def wipe_messages(update: Update, context: CallbackContext):
         # Проверяем, находится ли пользователь в списке авторизованных
         if user_id not in AUTHORIZED_USERS:
             logger.info(f"Пользователь {user_id} попытался использовать команду /wipe, но не имеет прав.")
-            update.message.reply_text("У вас нет прав на использование этой команды.")
+            await update.message.reply_text("У вас нет прав на использование этой команды.")
             return
 
         chat_id = update.message.chat_id
@@ -469,13 +469,13 @@ def wipe_messages(update: Update, context: CallbackContext):
             cur.close()
 
             if not messages:
-                update.message.reply_text("У вас нет сохраненных сообщений для удаления.")
+                await update.message.reply_text("У вас нет сохраненных сообщений для удаления.")
                 return
 
             deleted_count = 0
             for (msg_id,) in messages:
                 try:
-                    context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                    await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
                     deleted_count += 1
                     logger.info(f"Удалено сообщение ID {msg_id} пользователя ID {user_id}.")
                 except Exception as e:
@@ -492,15 +492,15 @@ def wipe_messages(update: Update, context: CallbackContext):
             except Exception as e:
                 logger.error(f"Ошибка при удалении записей сообщений из базы данных: {e}")
 
-            update.message.reply_text(f"Удалено {deleted_count} ваших сообщений.")
+            await update.message.reply_text(f"Удалено {deleted_count} ваших сообщений.")
         except Exception as e:
             logger.error(f"Ошибка при получении сообщений для удаления: {e}")
-            update.message.reply_text("Произошла ошибка при попытке удалить ваши сообщения.")
+            await update.message.reply_text("Произошла ошибка при попытке удалить ваши сообщения.")
     except Exception as e:
         logger.error(f"Ошибка в wipe_messages: {e}")
-        update.message.reply_text("Произошла ошибка при выполнении команды.")
+        await update.message.reply_text("Произошла ошибка при выполнении команды.")
 
-def help_command(update: Update, context: CallbackContext):
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправляет подробную информацию о доступных командах бота."""
     try:
         user_id = update.message.from_user.id
@@ -508,7 +508,7 @@ def help_command(update: Update, context: CallbackContext):
         # Проверяем, находится ли пользователь в списке авторизованных
         if user_id not in AUTHORIZED_USERS:
             logger.info(f"Пользователь {user_id} попытался использовать команду /help, но не имеет прав.")
-            update.message.reply_text("У вас нет прав на использование этой команды.")
+            await update.message.reply_text("У вас нет прав на использование этой команды.")
             return
 
         help_text = (
@@ -546,32 +546,30 @@ def help_command(update: Update, context: CallbackContext):
             "📌 **Примечание:** При использовании команд по @username убедитесь, что пользователь ранее отправлял сообщения в чат, чтобы его информация была сохранена в базе данных."
         )
 
-        update.message.reply_text(help_text, parse_mode='Markdown')
+        await update.message.reply_text(help_text, parse_mode='Markdown')
     except Exception as e:
         logger.error(f"Ошибка в help_command: {e}")
-        update.message.reply_text("Произошла ошибка при выполнении команды.")
+        await update.message.reply_text("Произошла ошибка при выполнении команды.")
 
 def main():
     """Основная функция запуска бота."""
-    updater = Updater(token=TELEGRAM_API_TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
+    application = Application.builder().token(TELEGRAM_API_TOKEN).build()
 
     # Обработчики команд
-    dispatcher.add_handler(CommandHandler('mute', mute_user))
-    dispatcher.add_handler(CommandHandler('unmute', unmute_user))
-    dispatcher.add_handler(CommandHandler('ban', ban_user))
-    dispatcher.add_handler(CommandHandler('unban', unban_user))
-    dispatcher.add_handler(CommandHandler('wipe', wipe_messages))
-    dispatcher.add_handler(CommandHandler('help', help_command))
+    application.add_handler(CommandHandler('mute', mute_user))
+    application.add_handler(CommandHandler('unmute', unmute_user))
+    application.add_handler(CommandHandler('ban', ban_user))
+    application.add_handler(CommandHandler('unban', unban_user))
+    application.add_handler(CommandHandler('wipe', wipe_messages))
+    application.add_handler(CommandHandler('help', help_command))
 
     # Обработчики сообщений
-    dispatcher.add_handler(MessageHandler(Filters.all & ~Filters.command, handle_message))
-    dispatcher.add_handler(MessageHandler(Filters.update.edited_message, handle_edited_message))
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, handle_edited_message))
 
     # Запуск бота
-    updater.start_polling()
     logger.info("Бот запущен и работает.")
-    updater.idle()
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
