@@ -22,7 +22,7 @@ DB_HOST = config('DB_HOST')
 DB_PORT = config('DB_PORT')
 
 # Список авторизованных пользователей (добавьте сюда Telegram user_id тех, кто может управлять ботом)
-AUTHORIZED_USERS = [530674302, 6122780749, 147218177, 336914967, 130043299, 111733381, 459816251]
+AUTHORIZED_USERS = [530674302, 6122780749, 471363051]
 
 # Подключение к базе данных PostgreSQL
 try:
@@ -42,6 +42,23 @@ except Exception as e:
 # Словарь для хранения замьюченных пользователей
 muted_users = {}  # {user_id: unmute_time}
 # Забаненные пользователи хранятся в таблице 'banned_users'
+
+# Создание таблицы known_users, если она не существует
+try:
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS known_users (
+            user_id BIGINT PRIMARY KEY,
+            username TEXT,
+            last_seen TIMESTAMP
+        );
+    """)
+    conn.commit()
+    cur.close()
+    logger.info("Таблица known_users проверена или создана.")
+except Exception as e:
+    logger.error(f"Ошибка при создании таблицы known_users: {e}")
+    exit(1)
 
 def check_and_remove_mute():
     """Проверяет и снимает мьют с пользователей, у которых время мьюта истекло."""
@@ -90,6 +107,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Получено сообщение от {username} (ID: {user_id})")
 
+    # Обновляем информацию о пользователе в таблице known_users
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO known_users (user_id, username, last_seen) VALUES (%s, %s, %s) "
+            "ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username, last_seen = EXCLUDED.last_seen",
+            (user_id, username, datetime.now())
+        )
+        cur.close()
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении known_users: {e}")
+
     # Проверяем и снимаем истекшие мьюты и баны
     check_and_remove_mute()
     check_and_remove_ban()
@@ -131,6 +160,18 @@ async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TY
     message_id = update.edited_message.message_id
 
     logger.info(f"Пользователь {username} (ID: {user_id}) отредактировал сообщение.")
+
+    # Обновляем информацию о пользователе в таблице known_users
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO known_users (user_id, username, last_seen) VALUES (%s, %s, %s) "
+            "ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username, last_seen = EXCLUDED.last_seen",
+            (user_id, username, datetime.now())
+        )
+        cur.close()
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении known_users: {e}")
 
     # Проверяем и снимаем истекшие мьюты и баны
     check_and_remove_mute()
@@ -189,9 +230,10 @@ async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Мьют по @username
                 username = args[0].lstrip('@').lower()
                 try:
+                    # Ищем пользователя в таблице known_users
                     cur = conn.cursor()
                     cur.execute(
-                        "SELECT user_id FROM banned_messages WHERE LOWER(username) = %s LIMIT 1",
+                        "SELECT user_id FROM known_users WHERE LOWER(username) = %s LIMIT 1",
                         (username,)
                     )
                     result = cur.fetchone()
@@ -228,7 +270,7 @@ async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         unmute_time = datetime.now() + timedelta(minutes=mute_duration)
         muted_users[target_user_id] = unmute_time
 
-        await update.message.reply_text(f"Пользователь @{target_username} берёт в ротек {mute_duration} минут.")
+        await update.message.reply_text(f"Пользователь @{target_username} замьючен на {mute_duration} минут.")
     except Exception as e:
         logger.error(f"Ошибка в mute_user: {e}")
         await update.message.reply_text("Произошла ошибка при выполнении команды.")
@@ -256,9 +298,10 @@ async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Размьют по @username
             username = context.args[0].lstrip('@').lower()
             try:
+                # Ищем пользователя в таблице known_users
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT user_id FROM banned_messages WHERE LOWER(username) = %s LIMIT 1",
+                    "SELECT user_id FROM known_users WHERE LOWER(username) = %s LIMIT 1",
                     (username,)
                 )
                 result = cur.fetchone()
@@ -314,9 +357,10 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Бан по @username
                 username = args[0].lstrip('@').lower()
                 try:
+                    # Ищем пользователя в таблице known_users
                     cur = conn.cursor()
                     cur.execute(
-                        "SELECT user_id FROM banned_messages WHERE LOWER(username) = %s LIMIT 1",
+                        "SELECT user_id FROM known_users WHERE LOWER(username) = %s LIMIT 1",
                         (username,)
                     )
                     result = cur.fetchone()
@@ -409,11 +453,11 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         username = context.args[0].lstrip('@').lower()
 
-        # Ищем user_id в таблице banned_users
+        # Ищем user_id в таблице known_users
         try:
             cur = conn.cursor()
             cur.execute(
-                "SELECT user_id FROM banned_users WHERE LOWER(username) = %s",
+                "SELECT user_id FROM known_users WHERE LOWER(username) = %s LIMIT 1",
                 (username,)
             )
             result = cur.fetchone()
@@ -422,7 +466,7 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if result:
                 target_user_id = result[0]
             else:
-                await update.message.reply_text(f"Пользователь @{username} не найден в списке забаненных пользователей.")
+                await update.message.reply_text(f"Пользователь @{username} не найден в базе данных.")
                 return
         except Exception as e:
             logger.error(f"Ошибка при поиске пользователя в базе данных: {e}")
@@ -543,7 +587,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "   - Ответьте на сообщение пользователя и введите `/unmute` — размьютить этого пользователя.\n"
             "   - `/wipe` — удалить все ваши сообщения в этом чате.\n\n"
             "⚠️ **Важно:** Все команды доступны только авторизованным пользователям.\n\n"
-            "📌 **Примечание:** При использовании команд по @username убедитесь, что пользователь ранее отправлял сообщения в чат, чтобы его информация была сохранена в базе данных."
+            "📌 **Примечание:** При использовании команд по @username убедитесь, что пользователь ранее отправлял сообщения в чатах, где присутствует бот, чтобы его информация была сохранена в базе данных."
         )
 
         await update.message.reply_text(help_text, parse_mode='Markdown')
