@@ -12,6 +12,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Устанавливаем уровень логирования для httpx на WARNING
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('telegram').setLevel(logging.WARNING)
+logging.getLogger('telegram.ext').setLevel(logging.WARNING)
+
 # Загрузка переменных из .env файла
 TELEGRAM_API_TOKEN = config('TELEGRAM_API_TOKEN')
 
