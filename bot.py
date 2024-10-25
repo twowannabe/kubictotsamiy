@@ -1,6 +1,6 @@
 import logging
 from decouple import config
-from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters
+from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters, StopPropagation
 from telegram import Update
 from datetime import datetime, timedelta
 import psycopg2
@@ -117,7 +117,7 @@ async def handle_muted_banned_users(update: Update, context: ContextTypes.DEFAUL
             await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
             logger.info(f"Сообщение от {status} пользователя {username} (ID: {user_id}) было удалено.")
             # Останавливаем дальнейшую обработку обновления
-            update.stop()
+            raise StopPropagation
         except Exception as e:
             logger.error(f"Ошибка при удалении сообщения от {status} пользователя {username} (ID: {user_id}): {e}")
         return
@@ -592,19 +592,19 @@ def main():
     application = Application.builder().token(TELEGRAM_API_TOKEN).build()
 
     # Обработчик для удаления сообщений от замьюченных или забаненных пользователей
-    application.add_handler(MessageHandler(filters.ALL, handle_muted_banned_users))
+    application.add_handler(MessageHandler(filters.ALL, handle_muted_banned_users), group=0)
 
     # Обработчики команд
-    application.add_handler(CommandHandler('mute', mute_user))
-    application.add_handler(CommandHandler('unmute', unmute_user))
-    application.add_handler(CommandHandler('ban', ban_user))
-    application.add_handler(CommandHandler('unban', unban_user))
-    application.add_handler(CommandHandler('wipe', wipe_messages))
-    application.add_handler(CommandHandler('help', help_command))
+    application.add_handler(CommandHandler('mute', mute_user), group=1)
+    application.add_handler(CommandHandler('unmute', unmute_user), group=1)
+    application.add_handler(CommandHandler('ban', ban_user), group=1)
+    application.add_handler(CommandHandler('unban', unban_user), group=1)
+    application.add_handler(CommandHandler('wipe', wipe_messages), group=1)
+    application.add_handler(CommandHandler('help', help_command), group=1)
 
     # Обработчики сообщений
-    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
-    application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, handle_edited_message))
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message), group=2)
+    application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, handle_edited_message), group=2)
 
     # Запуск бота
     logger.info("Бот запущен и работает.")
