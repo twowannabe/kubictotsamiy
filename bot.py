@@ -101,31 +101,35 @@ def is_user_banned(user_id):
 
 async def handle_muted_banned_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Удаляет сообщения от замьюченных или забаненных пользователей."""
-    message = update.message or update.edited_message
-    if not message:
-        return
+    try:
+        message = update.message or update.edited_message
+        if not message:
+            return
 
-    user_id = message.from_user.id
-    username = (message.from_user.username or message.from_user.first_name).lower()
-    chat_id = message.chat_id
-    message_id = message.message_id
+        user_id = message.from_user.id
+        username = (message.from_user.username or message.from_user.first_name).lower()
+        chat_id = message.chat_id
+        message_id = message.message_id
 
-    # Проверяем и снимаем истекшие мьюты и баны
-    check_and_remove_mute()
-    check_and_remove_ban()
+        # Проверяем и снимаем истекшие мьюты и баны
+        check_and_remove_mute()
+        check_and_remove_ban()
 
-    # Проверяем, замьючен или забанен ли пользователь
-    if user_id in muted_users or is_user_banned(user_id):
-        status = "замьючен" if user_id in muted_users else "забанен"
-        logger.info(f"Пользователь {username} (ID: {user_id}) {status}. Удаление сообщения.")
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-            logger.info(f"Сообщение от {status} пользователя {username} (ID: {user_id}) было удалено.")
-            # Останавливаем дальнейшую обработку обновления
-            raise ApplicationHandlerStop()
-        except Exception as e:
-            logger.error(f"Ошибка при удалении сообщения от {status} пользователя {username} (ID: {user_id}): {e}")
-        return
+        # Проверяем, замьючен или забанен ли пользователь
+        if user_id in muted_users or is_user_banned(user_id):
+            status = "замьючен" if user_id in muted_users else "забанен"
+            logger.info(f"Пользователь {username} (ID: {user_id}) {status}. Удаление сообщения.")
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+                logger.info(f"Сообщение от {status} пользователя {username} (ID: {user_id}) было удалено.")
+                # Останавливаем дальнейшую обработку обновления
+                raise ApplicationHandlerStop()
+            except Exception as e:
+                logger.error(f"Ошибка при удалении сообщения от {status} пользователя {username} (ID: {user_id}): {e}")
+        else:
+            logger.debug(f"Пользователь {username} (ID: {user_id}) не замьючен и не забанен.")
+    except Exception as e:
+        logger.error(f"Ошибка в handle_muted_banned_users: {e}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает входящие сообщения."""
@@ -595,6 +599,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Основная функция запуска бота."""
     application = Application.builder().token(TELEGRAM_API_TOKEN).build()
+
+    # Устанавливаем уровень логирования для httpx на WARNING
+    logging.getLogger('httpx').setLevel(logging.WARNING)
 
     # Обработчик для удаления сообщений от замьюченных или забаненных пользователей
     application.add_handler(MessageHandler(filters.ALL, handle_muted_banned_users), group=0)
