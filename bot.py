@@ -22,7 +22,7 @@ DB_HOST = config('DB_HOST')
 DB_PORT = config('DB_PORT')
 
 # Список авторизованных пользователей (добавьте сюда Telegram user_id тех, кто может управлять ботом)
-AUTHORIZED_USERS = [530674302, 6122780749, 471363051]
+AUTHORIZED_USERS = [530674302, 6122780749, 147218177, 336914967, 130043299, 111733381, 459816251, 391425127]
 
 # Подключение к базе данных PostgreSQL
 try:
@@ -94,8 +94,36 @@ def is_user_banned(user_id):
         logger.error(f"Ошибка при проверке статуса бана пользователя: {e}")
         return False
 
+async def handle_muted_banned_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удаляет сообщения от замьюченных или забаненных пользователей."""
+    message = update.message or update.edited_message
+    if not message:
+        return
+
+    user_id = message.from_user.id
+    username = (message.from_user.username or message.from_user.first_name).lower()
+    chat_id = message.chat_id
+    message_id = message.message_id
+
+    # Проверяем и снимаем истекшие мьюты и баны
+    check_and_remove_mute()
+    check_and_remove_ban()
+
+    # Проверяем, замьючен или забанен ли пользователь
+    if user_id in muted_users or is_user_banned(user_id):
+        status = "замьючен" if user_id in muted_users else "забанен"
+        logger.info(f"Пользователь {username} (ID: {user_id}) {status}. Удаление сообщения.")
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            logger.info(f"Сообщение от {status} пользователя {username} (ID: {user_id}) было удалено.")
+            # Останавливаем дальнейшую обработку обновления
+            update.stop()
+        except Exception as e:
+            logger.error(f"Ошибка при удалении сообщения от {status} пользователя {username} (ID: {user_id}): {e}")
+        return
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает входящие сообщения и удаляет их, если пользователь замьючен или забанен."""
+    """Обрабатывает входящие сообщения."""
     if not update.message:
         logger.error("Сообщение не найдено в обновлении.")
         return
@@ -119,24 +147,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Ошибка при обновлении known_users: {e}")
 
-    # Проверяем и снимаем истекшие мьюты и баны
-    check_and_remove_mute()
-    check_and_remove_ban()
-
-    # Удаляем сообщения от замьюченных или забаненных пользователей
-    if user_id in muted_users or is_user_banned(user_id):
-        status = "замьючен" if user_id in muted_users else "забанен"
-        logger.info(f"Пользователь {username} (ID: {user_id}) {status}. Удаление сообщения.")
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-            logger.info(f"Сообщение от {status} пользователя {username} (ID: {user_id}) было удалено.")
-            return
-        except Exception as e:
-            logger.error(f"Ошибка при удалении сообщения от {status} пользователя {username} (ID: {user_id}): {e}")
-            return
-    else:
-        logger.info(f"Пользователь {username} (ID: {user_id}) не замьючен и не забанен.")
-
     # Сохраняем информацию о сообщении в базе данных
     try:
         cur = conn.cursor()
@@ -149,7 +159,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка при сохранении сообщения в базе данных: {e}")
 
 async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает отредактированные сообщения и удаляет их, если пользователь замьючен или забанен."""
+    """Обрабатывает отредактированные сообщения."""
     if not update.edited_message:
         logger.error("Отредактированное сообщение не найдено в обновлении.")
         return
@@ -172,24 +182,6 @@ async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TY
         cur.close()
     except Exception as e:
         logger.error(f"Ошибка при обновлении known_users: {e}")
-
-    # Проверяем и снимаем истекшие мьюты и баны
-    check_and_remove_mute()
-    check_and_remove_ban()
-
-    # Удаляем отредактированные сообщения от замьюченных или забаненных пользователей
-    if user_id in muted_users or is_user_banned(user_id):
-        status = "замьючен" if user_id in muted_users else "забанен"
-        logger.info(f"Пользователь {username} (ID: {user_id}) {status}. Удаление отредактированного сообщения.")
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-            logger.info(f"Отредактированное сообщение от {status} пользователя {username} (ID: {user_id}) было удалено.")
-            return
-        except Exception as e:
-            logger.error(f"Ошибка при удалении отредактированного сообщения от {status} пользователя {username} (ID: {user_id}): {e}")
-            return
-    else:
-        logger.info(f"Пользователь {username} (ID: {user_id}) не замьючен и не забанен.")
 
     # Сохраняем информацию об отредактированном сообщении в базе данных
     try:
@@ -598,6 +590,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Основная функция запуска бота."""
     application = Application.builder().token(TELEGRAM_API_TOKEN).build()
+
+    # Обработчик для удаления сообщений от замьюченных или забаненных пользователей
+    application.add_handler(MessageHandler(filters.ALL, handle_muted_banned_users))
 
     # Обработчики команд
     application.add_handler(CommandHandler('mute', mute_user))
