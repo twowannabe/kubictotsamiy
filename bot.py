@@ -27,7 +27,7 @@ DB_HOST = config('DB_HOST')
 DB_PORT = config('DB_PORT')
 
 # List of authorized users
-AUTHORIZED_USERS = [530674302, 6122780749, 147218177, 336914967, 130043299, 111733381, 459816251, 391425127]
+AUTHORIZED_USERS = list(map(int, config('AUTHORIZED_USERS').split(',')))
 
 # Connect to PostgreSQL database
 try:
@@ -115,15 +115,15 @@ async def handle_muted_banned_users(update: Update, context: ContextTypes.DEFAUL
         # Check if user is muted or banned
         if user_id in muted_users or is_user_banned(user_id):
             status = "muted" if user_id in muted_users else "banned"
-            logger.info(f"User {username} (ID: {user_id}) is {status}. Deleting message.")
+            logger.info("Deleting message from user.")
             try:
                 await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-                logger.info(f"Message from {status} user {username} (ID: {user_id}) was deleted.")
+                logger.info("Message from user was deleted.")
                 raise ApplicationHandlerStop()
             except Exception as e:
                 logger.error(f"Error deleting message from {status} user {username} (ID: {user_id}): {e}")
         else:
-            logger.debug(f"User {username} (ID: {user_id}) is not muted or banned.")
+            logger.debug("User is not muted or banned.")
     except Exception as e:
         logger.error(f"Error in handle_muted_banned_users: {e}")
 
@@ -137,7 +137,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     message_id = update.message.message_id
 
-    logger.info(f"Received message from {username} (ID: {user_id})")
+    logger.info("Received message")
 
     # Update user information in the known_users table
     try:
@@ -249,7 +249,7 @@ async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TY
     chat_id = update.edited_message.chat_id
     message_id = update.edited_message.message_id
 
-    logger.info(f"User {username} (ID: {user_id}) edited a message.")
+    logger.info("User edited a message.")
 
     # Update user information in the known_users table
     try:
