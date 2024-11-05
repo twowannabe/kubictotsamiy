@@ -19,14 +19,11 @@ logging.getLogger('telegram.ext').setLevel(logging.WARNING)
 
 # Load environment variables
 TELEGRAM_API_TOKEN = config('TELEGRAM_API_TOKEN')
-
 DB_NAME = config('DB_NAME')
 DB_USER = config('DB_USER')
 DB_PASSWORD = config('DB_PASSWORD')
 DB_HOST = config('DB_HOST')
 DB_PORT = config('DB_PORT')
-
-# List of authorized users
 AUTHORIZED_USERS = list(map(int, config('AUTHORIZED_USERS').split(',')))
 
 # Connect to PostgreSQL database
@@ -64,7 +61,7 @@ except Exception as e:
     logger.error(f"Error creating known_users table: {e}")
     exit(1)
 
-# Utility functions to manage mute and ban status
+# Utility functions for mute and ban
 def check_and_remove_mute():
     now = datetime.now()
     to_remove = [user_id for user_id, unmute_time in muted_users.items() if now >= unmute_time]
@@ -89,8 +86,7 @@ def is_user_banned(user_id):
         cur.close()
         if result:
             ban_end_time = result[0]
-            if datetime.now() < ban_end_time:
-                return True
+            return datetime.now() < ban_end_time
         return False
     except Exception as e:
         logger.error(f"Error checking ban status for user: {e}")
@@ -115,15 +111,15 @@ async def handle_muted_banned_users(update: Update, context: ContextTypes.DEFAUL
         # Check if user is muted or banned
         if user_id in muted_users or is_user_banned(user_id):
             status = "muted" if user_id in muted_users else "banned"
-            logger.info("Deleting message from user.")
+            logger.info(f"Deleting message from {status} user {username} (ID: {user_id}).")
             try:
                 await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-                logger.info("Message from user was deleted.")
+                logger.info(f"Message from {status} user {username} (ID: {user_id}) was deleted.")
                 raise ApplicationHandlerStop()
             except Exception as e:
                 logger.error(f"Error deleting message from {status} user {username} (ID: {user_id}): {e}")
         else:
-            logger.debug("User is not muted or banned.")
+            logger.debug(f"User {username} (ID: {user_id}) is not muted or banned.")
     except Exception as e:
         logger.error(f"Error in handle_muted_banned_users: {e}")
 
@@ -162,6 +158,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Command Handlers
 async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mutes a user for the specified duration."""
     user_id = update.message.reply_to_message.from_user.id if update.message.reply_to_message else None
     mute_duration = int(context.args[0]) if context.args else 10
 
@@ -173,6 +170,7 @@ async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Please reply to a user's message to mute them.")
 
 async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Unmutes a user."""
     user_id = update.message.reply_to_message.from_user.id if update.message.reply_to_message else None
 
     if user_id and user_id in muted_users:
@@ -182,6 +180,7 @@ async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("User is not muted or could not be found.")
 
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bans a user for the specified duration."""
     user_id = update.message.reply_to_message.from_user.id if update.message.reply_to_message else None
     ban_duration = int(context.args[0]) if context.args else 10
 
@@ -203,6 +202,7 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Please reply to a user's message to ban them.")
 
 async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Unbans a user."""
     user_id = update.message.reply_to_message.from_user.id if update.message.reply_to_message else None
 
     if user_id:
@@ -218,6 +218,7 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Please reply to a user's message to unban them.")
 
 async def wipe_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Wipes all messages of the user in the chat."""
     user_id = update.message.from_user.id
     chat_id = update.message.chat_id
 
@@ -231,6 +232,7 @@ async def wipe_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("An error occurred while wiping your messages.")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Displays help information."""
     help_text = (
         "/mute [duration]: Mute a user for a specified duration (default is 10 minutes).\n"
         "/unmute: Unmute a user.\n"
@@ -242,6 +244,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text)
 
 async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles edited messages and updates the database."""
     user_id = update.edited_message.from_user.id
     username = (update.edited_message.from_user.username or update.edited_message.from_user.first_name).lower()
     chat_id = update.edited_message.chat_id
