@@ -163,7 +163,116 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error saving message to database: {e}")
 
 # Command Handlers
-# These handlers allow users to mute, unmute, ban, unban, and manage other users in the chat
+async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.reply_to_message.from_user.id if update.message.reply_to_message else None
+    mute_duration = int(context.args[0]) if context.args else 10
+
+    if user_id:
+        unmute_time = datetime.now() + timedelta(minutes=mute_duration)
+        muted_users[user_id] = unmute_time
+        await update.message.reply_text(f"User has been muted for {mute_duration} minutes.")
+    else:
+        await update.message.reply_text("Please reply to a user's message to mute them.")
+
+async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.reply_to_message.from_user.id if update.message.reply_to_message else None
+
+    if user_id and user_id in muted_users:
+        del muted_users[user_id]
+        await update.message.reply_text("User has been unmuted.")
+    else:
+        await update.message.reply_text("User is not muted or could not be found.")
+
+async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.reply_to_message.from_user.id if update.message.reply_to_message else None
+    ban_duration = int(context.args[0]) if context.args else 10
+
+    if user_id:
+        ban_end_time = datetime.now() + timedelta(minutes=ban_duration)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO banned_users (user_id, username, ban_end_time) VALUES (%s, %s, %s) "
+                "ON CONFLICT (user_id) DO UPDATE SET ban_end_time = EXCLUDED.ban_end_time",
+                (user_id, update.message.reply_to_message.from_user.username, ban_end_time)
+            )
+            cur.close()
+            await update.message.reply_text(f"User has been banned for {ban_duration} minutes.")
+        except Exception as e:
+            logger.error(f"Error banning user: {e}")
+            await update.message.reply_text("An error occurred while banning the user.")
+    else:
+        await update.message.reply_text("Please reply to a user's message to ban them.")
+
+async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.reply_to_message.from_user.id if update.message.reply_to_message else None
+
+    if user_id:
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM banned_users WHERE user_id = %s", (user_id,))
+            cur.close()
+            await update.message.reply_text("User has been unbanned.")
+        except Exception as e:
+            logger.error(f"Error unbanning user: {e}")
+            await update.message.reply_text("An error occurred while unbanning the user.")
+    else:
+        await update.message.reply_text("Please reply to a user's message to unban them.")
+
+async def wipe_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    chat_id = update.message.chat_id
+
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM banned_messages WHERE user_id = %s AND chat_id = %s", (user_id, chat_id))
+        cur.close()
+        await update.message.reply_text("Your messages have been wiped from the database.")
+    except Exception as e:
+        logger.error(f"Error wiping messages: {e}")
+        await update.message.reply_text("An error occurred while wiping your messages.")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        "/mute [duration]: Mute a user for a specified duration (default is 10 minutes).\n"
+        "/unmute: Unmute a user.\n"
+        "/ban [duration]: Ban a user for a specified duration (default is 10 minutes).\n"
+        "/unban: Unban a user.\n"
+        "/wipe: Wipe your messages from the database.\n"
+        "/help: Show this help message."
+    )
+    await update.message.reply_text(help_text)
+
+async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.edited_message.from_user.id
+    username = (update.edited_message.from_user.username or update.edited_message.from_user.first_name).lower()
+    chat_id = update.edited_message.chat_id
+    message_id = update.edited_message.message_id
+
+    logger.info(f"User {username} (ID: {user_id}) edited a message.")
+
+    # Update user information in the known_users table
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO known_users (user_id, username, last_seen) VALUES (%s, %s, %s) "
+            "ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username, last_seen = EXCLUDED.last_seen",
+            (user_id, username, datetime.now())
+        )
+        cur.close()
+    except Exception as e:
+        logger.error(f"Error updating known_users: {e}")
+
+    # Save edited message information in the database
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO banned_messages (chat_id, user_id, username, message_id) VALUES (%s, %s, %s, %s)",
+            (chat_id, user_id, username, message_id)
+        )
+        cur.close()
+    except Exception as e:
+        logger.error(f"Error saving edited message to database: {e}")
 
 # Main function to run the bot
 def main():
