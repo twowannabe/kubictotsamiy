@@ -103,5 +103,3 @@ For any inquiries, feel free to reach out via GitHub or open an issue in this re
 
 - [Python Telegram Bot Library](https://github.com/python-telegram-bot/python-telegram-bot) for providing a great interface to interact with Telegram's Bot API.
 - [PostgreSQL](https://www.postgresql.org/) for a reliable database solution.
-
-лад
