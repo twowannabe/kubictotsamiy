@@ -137,8 +137,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     message_id = update.message.message_id
 
-    logger.info("Received message")
-
     # Update user information in the known_users table
     try:
         cur = conn.cursor()
